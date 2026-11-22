@@ -28,7 +28,7 @@ Caochaoxing 是一个面向 **macOS、iOS / iPadOS 和 Android** 的非官方学
 
 欢迎在自己的手机上试用。遇到问题，可以在 Issues 里写下设备、系统版本、项目版本，以及哪一步和预期不同。若在教师或管理员授权的独立测试班级核验过结果，也欢迎分别写明客户端提示和后台记录。反馈时请隐去账号、Cookie、活动二维码等个人信息。
 
-计划在 TestFlight 发布 iOS 版本，[Releases](https://github.com/Pybsama/Caochaoxing/releases) 中已放上去安卓版和 Mac 版（Mac 显然不能扫码，所以主要是刷课而已）。或者复制源码去 TestFlight / Xcode 自行签名应该也可以使用了。
+计划在 TestFlight 发布 iOS 版本，[Releases](https://github.com/Pybsama/Caochaoxing/releases) 中已放上去安卓版和 Mac 版（Mac 显然不能扫码，所以主要是刷课而已）。现在有 Mac 的用户可以用 Xcode 打开源码，自行签名安装到 iPhone 或 iPad。
 
 ## iPhone / iPad 如何安装
 
