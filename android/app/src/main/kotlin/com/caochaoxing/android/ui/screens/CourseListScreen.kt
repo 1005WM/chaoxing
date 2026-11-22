@@ -20,7 +20,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccountCircle
+import androidx.compose.material.icons.automirrored.rounded.Assignment
 import androidx.compose.material.icons.rounded.Bookmark
+import androidx.compose.material.icons.automirrored.rounded.Assignment
 import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material.icons.rounded.Clear
 import androidx.compose.material.icons.rounded.Gesture
@@ -34,10 +36,13 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -47,6 +52,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,6 +60,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -61,7 +68,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.caochaoxing.android.CaochaoxingApp
 import com.caochaoxing.android.state.AndroidAppState
+import com.caochaoxing.android.state.AssessmentOverviewState
 import com.caochaoxing.android.state.CourseStudyController
 import com.caochaoxing.android.ui.components.CxBadge
 import com.caochaoxing.android.ui.components.CxFlowRow
@@ -95,10 +104,16 @@ fun CourseListScreen(
     onCourseClick: (ChaoxingCourse) -> Unit,
     onActivityClick: (ChaoxingSignActivity) -> Unit,
     onManageAccounts: () -> Unit,
+    onOpenTodo: () -> Unit,
     modifier: Modifier = Modifier,
     courseStudyController: CourseStudyController? = null,
 ) {
     val uiState by appState.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val overviewController = remember(context) {
+        (context.applicationContext as? CaochaoxingApp)?.assessmentOverviewController
+    }
+    val overviewState = overviewController?.uiState?.collectAsStateWithLifecycle()?.value
     val studyState = courseStudyController?.uiState?.collectAsStateWithLifecycle()?.value
     val appScope = rememberAppPersistenceScope()
     var searchText by rememberSaveable { mutableStateOf("") }
@@ -119,12 +134,21 @@ fun CourseListScreen(
         starred + unstarred
     }
 
+    LaunchedEffect(uiState.courses, uiState.activePhoneNumber) {
+        if (uiState.courses.isNotEmpty()) {
+            overviewController?.load(uiState.courses)
+        }
+    }
+
     fun triggerRefresh() {
         if (isRefreshing) return
         appScope.launch {
             isRefreshing = true
             try {
                 appState.refreshCourses()
+                if (uiState.courses.isNotEmpty()) {
+                    overviewController?.load(uiState.courses, force = true)
+                }
             } finally {
                 isRefreshing = false
             }
@@ -184,13 +208,28 @@ fun CourseListScreen(
                         Text("我的课程", style = CxTypography.brandDisplay, color = CxPalette.ink)
                         if (uiState.courses.isNotEmpty()) {
                             val favorites = uiState.courses.count { it.courseId in uiState.starredCourseIds }
-                            val count = "共 ${uiState.courses.size} 门课程"
+                            val pending = overviewState?.totalPending ?: 0
+                            val count = buildString {
+                                append("共 ${uiState.courses.size} 门课程")
+                                if (favorites > 0) append(" · $favorites 门常用")
+                                if (pending > 0) append(" · $pending 项作业未完成")
+                            }
                             Text(
-                                if (favorites == 0) count else "$count · $favorites 门常用",
+                                count,
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = CxPalette.inkSecondary,
                             )
                         }
+                    }
+                }
+
+                if (overviewState != null && (overviewState.totalPending > 0 || overviewState.errors.isNotEmpty())) {
+                    item(key = "assessment_todo_entry") {
+                        AssessmentTodoEntryCard(
+                            state = overviewState,
+                            onOpen = onOpenTodo,
+                            modifier = Modifier.padding(bottom = 14.dp),
+                        )
                     }
                 }
 
@@ -430,6 +469,26 @@ fun CourseListScreen(
                                     }
                                 }
                             }
+                            val pendingWorks = overviewState?.pendingWorks(course.id) ?: 0
+                            val pendingExams = overviewState?.pendingExams(course.id) ?: 0
+                            Column(
+                                horizontalAlignment = Alignment.End,
+                                verticalArrangement = Arrangement.spacedBy(3.dp),
+                            ) {
+                                if (overviewState != null && course.id in overviewState.loadingCourseKeys) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(12.dp),
+                                        strokeWidth = 1.5.dp,
+                                    )
+                                } else {
+                                    if (pendingWorks > 0) {
+                                        CxBadge(text = "作业 $pendingWorks", tone = CxTone.AMBER, monospaced = true)
+                                    }
+                                    if (pendingExams > 0) {
+                                        CxBadge(text = "考试 $pendingExams", tone = CxTone.CINNABAR, monospaced = true)
+                                    }
+                                }
+                            }
                             IconToggleButton(
                                 checked = isStarred,
                                 onCheckedChange = { appScope.launch { appState.toggleStarCourse(course.courseId) } },
@@ -448,5 +507,66 @@ fun CourseListScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * 课程列表顶部的待办入口：汇总全部课程的未完成作业 / 考试，点开看明细（带科目名）。
+ */
+@Composable
+private fun AssessmentTodoEntryCard(
+    state: AssessmentOverviewState,
+    onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val subtitle = buildString {
+        if (state.pendingCourseCount > 0) {
+            append("涉及 ${state.pendingCourseCount} 门课程")
+        }
+        if (state.pendingExamCount > 0) {
+            if (isNotEmpty()) append(" · ")
+            append("其中考试 ${state.pendingExamCount} 项")
+        }
+        if (state.errors.isNotEmpty()) {
+            if (isNotEmpty()) append(" · ")
+            append("${state.errors.size} 门课程读取失败")
+        }
+    }
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(CxPalette.amber.copy(alpha = 0.12f))
+            .clickable(onClick = onOpen)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        CxIconTile(icon = Icons.AutoMirrored.Rounded.Assignment, tone = CxTone.AMBER, size = 34.dp)
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(
+                text = if (state.pendingWorkCount > 0) {
+                    "未完成作业 ${state.pendingWorkCount} 项"
+                } else {
+                    "待办 ${state.totalPending} 项"
+                },
+                style = CxTypography.headline,
+                color = CxPalette.ink,
+            )
+            if (subtitle.isNotBlank()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = CxPalette.inkSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Text(
+            text = "查看",
+            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+            color = CxPalette.amber,
+        )
     }
 }

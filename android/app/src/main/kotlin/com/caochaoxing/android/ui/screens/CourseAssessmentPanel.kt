@@ -49,7 +49,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -224,7 +223,7 @@ private fun AssessmentOverviewCard(state: CourseAssessmentUiState) {
         if (nextDeadline?.deadlineAtMs != null) {
             val at = nextDeadline.deadlineAtMs!!
             Text(
-                text = "最近截止 ${formatDeadline(at)} · ${relativeDeadline(at, System.currentTimeMillis())}",
+                text = "最近截止 ${formatAssessmentDeadline(at)} · ${relativeAssessmentDeadline(at, System.currentTimeMillis())}",
                 style = CxTypography.mono(11.sp),
                 color = if (nextDeadline.isOverdueAt(System.currentTimeMillis())) CxPalette.cinnabar else CxPalette.inkSecondary,
             )
@@ -326,11 +325,11 @@ private fun DeadlineLine(item: ChaoxingAssessmentItem) {
     val overdue = item.isOverdueAt(now)
     when {
         at != null -> {
-            val relative = relativeDeadline(at, now)
+            val relative = relativeAssessmentDeadline(at, now)
             Text(
                 text = buildString {
                     append("截止 ")
-                    append(formatDeadline(at))
+                    append(formatAssessmentDeadline(at))
                     if (relative != null) {
                         append(" · ")
                         append(relative)
@@ -349,35 +348,6 @@ private fun DeadlineLine(item: ChaoxingAssessmentItem) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-    }
-}
-
-private fun sortAssessments(items: List<ChaoxingAssessmentItem>): List<ChaoxingAssessmentItem> =
-    items.sortedWith(
-        compareBy<ChaoxingAssessmentItem> { if (it.status.isPending) 0 else 1 }
-            .thenBy { it.deadlineAtMs ?: Long.MAX_VALUE },
-    )
-
-private fun formatDeadline(epochMs: Long): String {
-    val dateTime = Instant.ofEpochMilli(epochMs).atZone(ZoneId.systemDefault())
-    val clock = "%02d:%02d".format(dateTime.hour, dateTime.minute)
-    return if (dateTime.year == LocalDate.now().year) {
-        "${dateTime.monthValue}月${dateTime.dayOfMonth}日 $clock"
-    } else {
-        "${dateTime.year}年${dateTime.monthValue}月${dateTime.dayOfMonth}日 $clock"
-    }
-}
-
-private fun relativeDeadline(epochMs: Long, nowMs: Long): String? {
-    val diff = epochMs - nowMs
-    if (diff <= 0) return "已截止"
-    val minutes = diff / 60_000
-    return when {
-        minutes < 1 -> "不足 1 分钟"
-        minutes < 60 -> "剩 $minutes 分钟"
-        minutes < 24 * 60 -> "剩 ${minutes / 60} 小时 ${minutes % 60} 分"
-        minutes < 7 * 24 * 60 -> "剩 ${minutes / (24 * 60)} 天 ${(minutes % (24 * 60)) / 60} 小时"
-        else -> "剩 ${minutes / (24 * 60)} 天"
     }
 }
 

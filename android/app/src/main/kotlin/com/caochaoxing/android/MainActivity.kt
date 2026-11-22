@@ -89,6 +89,9 @@ import com.caochaoxing.android.ui.components.CxHairlineDivider
 import com.caochaoxing.android.ui.components.CxIconTile
 import com.caochaoxing.android.ui.components.CxPrimaryButton
 import com.caochaoxing.android.ui.components.CxTone
+import com.caochaoxing.android.ui.screens.AssessmentTodoScreen
+import com.caochaoxing.android.ui.screens.COURSE_SUBTAB_ASSESSMENT
+import com.caochaoxing.android.ui.screens.COURSE_SUBTAB_SIGN
 import com.caochaoxing.android.ui.screens.CourseDetailScreen
 import com.caochaoxing.android.ui.screens.CourseListScreen
 import com.caochaoxing.android.ui.screens.GroupDetailScreen
@@ -150,15 +153,22 @@ class MainActivity : ComponentActivity() {
 
 private object CxRoutes {
     const val MAIN = "main"
-    const val COURSE_DETAIL = "course_detail/{courseKey}"
+    const val COURSE_DETAIL = "course_detail/{courseKey}?tab={tab}"
+    const val ASSESSMENT_TODO = "assessment_todo"
     const val GROUP_DETAIL = "group_detail/{encodedGroupId}"
     const val OTHER_USERS = "other_users"
     const val LOCATION_PRESETS = "location_presets"
     const val SIGN_HISTORY = "sign_history"
     const val SIGN_WORKSPACE = "sign_workspace"
 
-    fun courseDetail(courseKey: String): String =
-        "course_detail/${Uri.encode(courseKey)}"
+    fun courseDetail(courseKey: String, tab: Int? = null): String = buildString {
+        append("course_detail/")
+        append(Uri.encode(courseKey))
+        if (tab != null) {
+            append("?tab=")
+            append(tab)
+        }
+    }
 
     fun groupDetail(groupId: String): String {
         val encoded = Base64.getUrlEncoder()
@@ -508,6 +518,9 @@ private fun AuthenticatedMainContainer(
                                 onManageAccounts = {
                                     navController.navigate(CxRoutes.OTHER_USERS)
                                 },
+                                onOpenTodo = {
+                                    navController.navigate(CxRoutes.ASSESSMENT_TODO)
+                                },
                             )
 
                             AndroidAppState.TAB_GROUPS -> GroupListScreen(
@@ -548,6 +561,9 @@ private fun AuthenticatedMainContainer(
                                 onManageAccounts = {
                                     navController.navigate(CxRoutes.OTHER_USERS)
                                 },
+                                onOpenTodo = {
+                                    navController.navigate(CxRoutes.ASSESSMENT_TODO)
+                                },
                             )
                         }
                     }
@@ -557,15 +573,33 @@ private fun AuthenticatedMainContainer(
 
         composable(
             route = CxRoutes.COURSE_DETAIL,
-            arguments = listOf(navArgument("courseKey") { type = NavType.StringType }),
+            arguments = listOf(
+                navArgument("courseKey") { type = NavType.StringType },
+                navArgument("tab") {
+                    type = NavType.IntType
+                    defaultValue = COURSE_SUBTAB_SIGN
+                },
+            ),
         ) { backStackEntry ->
             val courseKey = backStackEntry.arguments?.getString("courseKey").orEmpty()
+            val initialTab = backStackEntry.arguments?.getInt("tab") ?: COURSE_SUBTAB_SIGN
             CourseDetailScreen(
                 appState = appState,
                 courseKey = courseKey,
                 onBack = { navController.popBackStack() },
                 onActivityClick = ::openSignActivity,
                 courseStudyController = courseStudyController,
+                initialSubTab = initialTab,
+            )
+        }
+
+        composable(CxRoutes.ASSESSMENT_TODO) {
+            AssessmentTodoScreen(
+                appState = appState,
+                onBack = { navController.popBackStack() },
+                onCourseClick = { course ->
+                    navController.navigate(CxRoutes.courseDetail(course.id, tab = COURSE_SUBTAB_ASSESSMENT))
+                },
             )
         }
 

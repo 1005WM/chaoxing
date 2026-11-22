@@ -44,7 +44,7 @@ Caochaoxing 是一个面向 **macOS、iOS / iPadOS 和 Android** 的非官方学
 | 环境 | 已验证的范围 |
 | --- | --- |
 | iOS / iPadOS | Xcode 26.3 完成通用模拟器 Release 编译、链接及资源打包，并在全新的 iPhone 17 模拟器启动至登录页。此前的授权账号登录及课程、活动读取见 [iOS 验证记录](docs/VALIDATION.md)。 |
-| Android | 本 fork：`:core` 78 项 + `:app` 28 项单元测试通过（含作业/考试 12 项解析测试 + 4 项控制器测试），Debug APK 构建成功；未重跑 Lint 与设备测试，也未在真实账号核对作业/考试接口。上游记录：Lint 12 个警告、0 个错误，API 35 模拟器 6 项设备测试通过。[活动导航测试](android/app/src/androidTest/kotlin/com/caochaoxing/android/SimulatedActivityNavigationTest.kt) · [密码表单测试](android/app/src/androidTest/kotlin/com/caochaoxing/android/PasswordRecreationTest.kt) · [此前的授权账号验证](docs/ANDROID_UI_VALIDATION.md) |
+| Android | 本 fork：`:core` 81 项 + `:app` 32 项单元测试通过（含作业/考试解析、截止时间、课程列表总览与控制器测试），Debug APK 构建成功；未重跑 Lint 与设备测试，也未在真实账号核对作业/考试接口。上游记录：Lint 12 个警告、0 个错误，API 35 模拟器 6 项设备测试通过。[活动导航测试](android/app/src/androidTest/kotlin/com/caochaoxing/android/SimulatedActivityNavigationTest.kt) · [密码表单测试](android/app/src/androidTest/kotlin/com/caochaoxing/android/PasswordRecreationTest.kt) · [此前的授权账号验证](docs/ANDROID_UI_VALIDATION.md) |
 | macOS / Swift Package | 122 项 Swift 测试通过，覆盖共享库、iOS 状态控制器和 macOS 账号操作。macOS Release 可执行文件构建及本地签名校验通过。回放测试使用模拟响应，本轮未核对线上学习记录。[macOS 回归测试](Tests/CaochaoxingMacTests/MacAppStateRegressionTests.swift) |
 
 欢迎在自己的设备上试用，并通过 GitHub Issues 反馈成功或失败的结果。如果希望验证提交后的记录，请使用由教师或管理员明确授权、与正式考勤隔离的测试班级和测试账号，并请组织者核对后台记录。
@@ -67,7 +67,7 @@ Caochaoxing 是一个面向 **macOS、iOS / iPadOS 和 Android** 的非官方学
   - 系统选图识别二维码（iOS 使用 `PhotosPicker`；Android 使用 `PickVisualMedia`，无需宽泛相册读取权限）与文本/链接粘贴解析（三端均支持）。
   - 拍照防重复处理（Android `AndroidImageObfuscator` 支持 EXIF 方向归一化、微裁切与缩放、稀疏像素扰动及 JPEG `COM` 注释块写入）。
 - **滑块验证**：三端统一使用本地像素边缘梯度匹配自动识别（纯代码计算，不使用 ONNX 推理），自动识别失败时回退手动滑块弹窗，并支持多账号并发验证排队。
-- **作业与考试（本 fork，仅 Android）**：课程详情新增「作业/考试」分栏，只读读取该课程全部作业与考试，展示服务端原文状态（未交 / 待批阅 / 已批阅 / 已过期等）、**精确到分的截止时间与剩余时间**，以及汇总统计（未完成、已完成、已过期、状态未知）。不打开做题页、不提交、不修改服务端状态。数据源与解析边界见 [docs/ANDROID_ASSESSMENTS.md](docs/ANDROID_ASSESSMENTS.md)。
+- **作业与考试（本 fork，仅 Android）**：课程详情新增「作业/考试」分栏，只读读取该课程全部作业与考试，展示服务端原文状态（未交 / 待批阅 / 已批阅 / 已过期等）、**精确到分的截止时间与剩余时间**，以及汇总统计（未完成、已完成、已过期、状态未知）。课程列表会显示每门课的未完成数量，并提供**按科目分组的待办清单**。不打开做题页、不提交、不修改服务端状态。数据源与解析边界见 [docs/ANDROID_ASSESSMENTS.md](docs/ANDROID_ASSESSMENTS.md)。
 - **数据安全与备份**：
   - iOS 在应用沙盒内保存 `state.json`。按下方命令构建的 macOS 版将会话保存在当前用户的 `~/Library/Application Support/Caochaoxing/state.json`，文件权限为 `0600`。Android 使用 **Android Keystore AES-256-GCM** 加密存储 `filesDir/caochaoxing/state.enc`。
   - 本地保留最近 100 条签到历史。iOS 和 Android 支持导入、导出格式兼容的 JSON 备份，默认不含账号凭据。Android 使用系统文件选择器。

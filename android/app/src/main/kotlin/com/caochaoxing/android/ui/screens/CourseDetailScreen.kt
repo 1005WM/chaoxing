@@ -69,9 +69,9 @@ import com.caochaoxing.android.ui.theme.CxTypography
 import com.caochaoxing.core.model.ChaoxingSignActivity
 import kotlinx.coroutines.launch
 
-private const val COURSE_SUBTAB_SIGN = 0
-private const val COURSE_SUBTAB_STUDY = 1
-private const val COURSE_SUBTAB_ASSESSMENT = 2
+const val COURSE_SUBTAB_SIGN = 0
+const val COURSE_SUBTAB_STUDY = 1
+const val COURSE_SUBTAB_ASSESSMENT = 2
 
 /**
  * Course detail screen cleanly separating sign-in activities and legal course video/document study.
@@ -84,6 +84,7 @@ fun CourseDetailScreen(
     onActivityClick: (ChaoxingSignActivity) -> Unit,
     modifier: Modifier = Modifier,
     courseStudyController: CourseStudyController? = null,
+    initialSubTab: Int = COURSE_SUBTAB_SIGN,
 ) {
     val uiState by appState.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -113,7 +114,9 @@ fun CourseDetailScreen(
     val isLoading = courseKey in uiState.loadingCourseIds
     val isLoadingChapters = courseKey in studyState.loadingChapterCourseIds
     var isRefreshing by remember { mutableStateOf(false) }
-    var selectedSubTab by rememberSaveable(courseKey) { mutableIntStateOf(COURSE_SUBTAB_SIGN) }
+    var selectedSubTab by rememberSaveable(courseKey) {
+        mutableIntStateOf(initialSubTab.coerceIn(COURSE_SUBTAB_SIGN, COURSE_SUBTAB_ASSESSMENT))
+    }
     var expandedChapterKeys by remember(courseKey, uiState.activePhoneNumber) {
         mutableStateOf(emptySet<String>())
     }
