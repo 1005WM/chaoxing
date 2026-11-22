@@ -3,6 +3,7 @@
 
 package com.caochaoxing.android.state
 
+import com.caochaoxing.core.model.ChaoxingAssessmentItem
 import com.caochaoxing.core.model.ChaoxingAssessmentKind
 import com.caochaoxing.core.model.ChaoxingAssessmentSummary
 import com.caochaoxing.core.model.ChaoxingCourse
@@ -14,6 +15,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
@@ -46,6 +48,8 @@ class AssessmentController(
         ((ChaoxingAssessmentKind, String) -> Unit)?,
     ) -> ChaoxingAssessmentSummary =
         { client, course, onSample -> ChaoxingAssessmentService.fetchSummary(client, course, onSample = onSample) },
+    private val enrichDeadlines: suspend (ChaoxingHttpClient, List<ChaoxingAssessmentItem>) -> List<ChaoxingAssessmentItem> =
+        { client, works -> ChaoxingAssessmentService.enrichPendingWorkDeadlines(client, works) },
 ) {
     constructor(appState: AndroidAppState, scope: CoroutineScope) : this(
         clientProvider = { appState.activeClient },
@@ -103,6 +107,15 @@ class AssessmentController(
                     summary = summary,
                     sampleText = joinSamples(samples),
                 )
+                // 列表页只有日期时，再用做题页补全未完成作业的截止时分；失败保持原样。
+                if (summary.works.any { it.isPending && it.deadlineAtMs == null && !it.taskUrl.isNullOrBlank() }) {
+                    val enriched = enrichDeadlines(client, summary.works)
+                    if (_uiState.value.courseKey == key && enriched != summary.works) {
+                        _uiState.update {
+                            it.copy(summary = summary.copy(works = enriched))
+                        }
+                    }
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {

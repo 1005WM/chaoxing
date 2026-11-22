@@ -77,6 +77,8 @@ class AssessmentOverviewController(
     private val scope: CoroutineScope,
     private val fetchSummary: suspend (ChaoxingHttpClient, ChaoxingCourse) -> ChaoxingAssessmentSummary =
         { client, course -> ChaoxingAssessmentService.fetchSummary(client, course) },
+    private val enrichDeadlines: suspend (ChaoxingHttpClient, List<ChaoxingAssessmentItem>) -> List<ChaoxingAssessmentItem> =
+        { client, works -> ChaoxingAssessmentService.enrichPendingWorkDeadlines(client, works) },
     private val maxConcurrency: Int = 3,
 ) {
     constructor(appState: AndroidAppState, scope: CoroutineScope) : this(
@@ -123,32 +125,46 @@ class AssessmentOverviewController(
             _uiState.update { it.copy(loadingCourseKeys = it.loadingCourseKeys + course.id) }
             val job = scope.launch {
                 try {
-                    semaphore.withPermit {
-                        if (gen != generation.get()) return@withPermit
-                        val result = try {
+                    val result = semaphore.withPermit {
+                        if (gen != generation.get()) return@withPermit null
+                        try {
                             Result.success(fetchSummary(client, course))
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: Throwable) {
                             Result.failure(e)
                         }
-                        if (gen != generation.get()) return@withPermit
-                        _uiState.update { state ->
-                            result.fold(
-                                onSuccess = { summary ->
-                                    state.copy(
-                                        summaries = state.summaries + (course.id to summary),
-                                        errors = state.errors - course.id,
-                                        updatedAtMs = System.currentTimeMillis(),
-                                    )
-                                },
-                                onFailure = { error ->
-                                    state.copy(
-                                        errors = state.errors +
-                                            (course.id to (error.message ?: "加载失败")),
-                                    )
-                                },
-                            )
+                    } ?: return@launch
+                    if (gen != generation.get()) return@launch
+
+                    _uiState.update { state ->
+                        result.fold(
+                            onSuccess = { summary ->
+                                state.copy(
+                                    summaries = state.summaries + (course.id to summary),
+                                    errors = state.errors - course.id,
+                                    updatedAtMs = System.currentTimeMillis(),
+                                )
+                            },
+                            onFailure = { error ->
+                                state.copy(
+                                    errors = state.errors +
+                                        (course.id to (error.message ?: "加载失败")),
+                                )
+                            },
+                        )
+                    }
+
+                    val summary = result.getOrNull() ?: return@launch
+                    if (summary.works.any { it.isPending && it.deadlineAtMs == null && !it.taskUrl.isNullOrBlank() }) {
+                        val enriched = enrichDeadlines(client, summary.works)
+                        if (enriched != summary.works && gen == generation.get()) {
+                            _uiState.update { state ->
+                                state.copy(
+                                    summaries = state.summaries +
+                                        (course.id to summary.copy(works = enriched)),
+                                )
+                            }
                         }
                     }
                 } finally {

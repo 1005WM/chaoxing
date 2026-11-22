@@ -275,10 +275,15 @@ private fun TodoRow(item: ChaoxingAssessmentItem, onClick: () -> Unit) {
                 )
                 val now = System.currentTimeMillis()
                 val at = item.deadlineAtMs
+                val fallback = item.detail.takeIf { detail ->
+                    detail.isNotBlank() &&
+                        !(item.kind == ChaoxingAssessmentKind.EXAM && detail.trim().toDoubleOrNull() != null)
+                }
                 val deadlineText = when {
                     at != null -> "截止 ${formatAssessmentDeadline(at)} · ${relativeAssessmentDeadline(at, now)}"
                     !item.deadlineText.isNullOrBlank() -> "截止 ${item.deadlineText}（页面未提供时分）"
-                    else -> "页面未提供截止时间"
+                    fallback != null -> "$fallback · 截止时间未提供"
+                    else -> "页面未提供时间"
                 }
                 Text(
                     text = deadlineText,

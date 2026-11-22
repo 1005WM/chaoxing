@@ -13,6 +13,9 @@ import com.caochaoxing.core.network.HttpResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import java.net.URI
 import java.time.Instant
 import java.time.LocalDate
@@ -165,6 +168,97 @@ object ChaoxingAssessmentService {
             response = client.get(url)
         }
         return response
+    }
+
+    /**
+     * 列表页往往只有日期，没有截止时分。对仍未完成、且缺少精确截止时间的作业，
+     * 打开它的做题页（只读 GET）再解析一次「截止时间」。
+     *
+     * 只有同时满足「作业 / 未完成 / 没有精确截止 / 有做题页链接」的条目才会请求，
+     * 每门课最多 [maxItems] 个，最多 [concurrency] 路并发；失败或解析不到就保持原样。
+     * 只读，不会开始或提交作业。
+     */
+    suspend fun enrichPendingWorkDeadlines(
+        client: ChaoxingHttpClient,
+        works: List<ChaoxingAssessmentItem>,
+        nowMs: Long = System.currentTimeMillis(),
+        maxItems: Int = 8,
+        concurrency: Int = 3,
+        zone: ZoneId = ZoneId.systemDefault(),
+        requireChaoxingHost: Boolean = true,
+    ): List<ChaoxingAssessmentItem> {
+        val targets = works
+            .asSequence()
+            .filter {
+                it.kind == ChaoxingAssessmentKind.WORK &&
+                    it.status.isPending &&
+                    it.deadlineAtMs == null &&
+                    !it.taskUrl.isNullOrBlank()
+            }
+            .take(maxItems)
+            .toList()
+        if (targets.isEmpty()) return works
+
+        val resolved = java.util.concurrent.ConcurrentHashMap<String, ChaoxingAssessmentDeadlineInfo>()
+        coroutineScope {
+            val semaphore = Semaphore(concurrency)
+            targets.forEach { item ->
+                launch {
+                    semaphore.withPermit {
+                        val info = runCatching {
+                            fetchDeadlineFromTaskPage(
+                                client = client,
+                                taskUrl = item.taskUrl.orEmpty(),
+                                nowMs = nowMs,
+                                zone = zone,
+                                requireChaoxingHost = requireChaoxingHost,
+                            )
+                        }.getOrNull()
+                        if (info != null) resolved[item.id] = info
+                    }
+                }
+            }
+        }
+        if (resolved.isEmpty()) return works
+        return works.map { item ->
+            resolved[item.id]?.let { info ->
+                item.copy(
+                    deadlineText = item.deadlineText ?: info.text,
+                    deadlineAtMs = item.deadlineAtMs ?: info.atMs,
+                )
+            } ?: item
+        }
+    }
+
+    /** 只读打开做题页，要求页面里出现带「截止」等关键词的时间才采信。 */
+    private suspend fun fetchDeadlineFromTaskPage(
+        client: ChaoxingHttpClient,
+        taskUrl: String,
+        nowMs: Long,
+        zone: ZoneId,
+        requireChaoxingHost: Boolean,
+    ): ChaoxingAssessmentDeadlineInfo? {
+        val uri = runCatching { URI(taskUrl) }.getOrNull() ?: return null
+        val host = uri.host?.lowercase() ?: return null
+        if (requireChaoxingHost && !host.endsWith(".chaoxing.com") && host != "chaoxing.com") return null
+        if (requireChaoxingHost && !uri.scheme.equals("https", ignoreCase = true)) return null
+
+        val (response, html) = try {
+            val result = client.get(taskUrl)
+            if (!result.isSuccessful) return null
+            result to result.bodyAsString()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            return null
+        }
+        if (isLoginPageHtml(html)) return null
+        return ChaoxingAssessmentDeadline.extract(
+            raw = html,
+            nowMs = nowMs,
+            zone = zone,
+            allowSingleUnkeyed = false,
+        )
     }
 
     /** 解析作业列表 `workList` 页面。 */

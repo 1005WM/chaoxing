@@ -4,6 +4,7 @@
 package com.caochaoxing.core.service
 
 import com.caochaoxing.core.model.ChaoxingAccountSession
+import com.caochaoxing.core.model.ChaoxingAssessmentItem
 import com.caochaoxing.core.model.ChaoxingAssessmentKind
 import com.caochaoxing.core.model.ChaoxingAssessmentStatus
 import com.caochaoxing.core.model.ChaoxingCourse
@@ -410,6 +411,59 @@ class AssessmentServiceTest {
             LocalDateTime.of(2026, 12, 2, 18, 0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
             items[0].deadlineAtMs,
         )
+    }
+
+    @Test
+    fun enrichPendingWorkDeadlinesReadsTaskPage() = runTest {
+        val server = MockWebServer()
+        server.start()
+        try {
+            val base = server.url("/").toString().trimEnd('/')
+            server.enqueue(
+                MockResponse().setResponseCode(200).setBody(
+                    """
+                    <html><body>
+                      <h1>实验报告</h1>
+                      <p>发布时间：2026-11-20</p>
+                      <p>截止时间：2026-12-05 20:00</p>
+                      <a href="#">提交作业</a>
+                    </body></html>
+                    """.trimIndent(),
+                ),
+            )
+            val pending = ChaoxingAssessmentItem(
+                kind = ChaoxingAssessmentKind.WORK,
+                title = "实验报告",
+                statusText = "做作业",
+                courseId = 300001L,
+                classId = 200001,
+                courseName = "高等数学",
+                taskUrl = "$base/work/phone/task-work?workId=9101",
+            )
+            val done = pending.copy(
+                title = "已交作业",
+                statusText = "已交",
+                taskUrl = "$base/work/phone/task-work?workId=9102",
+            )
+
+            val enriched = ChaoxingAssessmentService.enrichPendingWorkDeadlines(
+                client = syntheticClient(),
+                works = listOf(pending, done),
+                requireChaoxingHost = false,
+            )
+
+            assertEquals(1, server.requestCount)
+            assertEquals("2026-12-05 20:00", enriched[0].deadlineText)
+            assertEquals(
+                LocalDateTime.of(2026, 12, 5, 20, 0)
+                    .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+                enriched[0].deadlineAtMs,
+            )
+            assertNull(enriched[1].deadlineText)
+            assertNull(enriched[1].deadlineAtMs)
+        } finally {
+            server.shutdown()
+        }
     }
 
     @Test
