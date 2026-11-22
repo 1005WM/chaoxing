@@ -20,6 +20,8 @@ import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.time.LocalDateTime
+import java.time.ZoneId
 
 class AssessmentServiceTest {
     private val course = ChaoxingCourse(
@@ -56,7 +58,7 @@ class AssessmentServiceTest {
         <dl class="work-list">
           <dt data="work/phone/task-work?courseId=300001&classId=200001&workId=9001" status="1">
             <h3>第一章 极限（客观题）</h3>
-            <p>2026-11-20 发布</p>
+            <p>发布时间：2026-11-20 08:30 截止时间：2026-11-27 23:59</p>
             <b>做作业</b>
           </dt>
           <dt data="/work/phone/task-work?workId=9002" status="2">
@@ -82,7 +84,7 @@ class AssessmentServiceTest {
             <td><span>期中考试</span></td><td>86</td><td>已批阅</td>
           </tr>
           <tr data="/exam/phone/task-exam?examId=8002" title="单元测验" status="0">
-            <td>单元测验</td><td>--</td><td>未交</td>
+            <td>单元测验</td><td>2026-12-01 09:00-11:00</td><td>未交</td>
           </tr>
         </table>
         </body></html>
@@ -101,7 +103,13 @@ class AssessmentServiceTest {
         assertEquals(ChaoxingAssessmentKind.WORK, first.kind)
         assertEquals("第一章 极限（客观题）", first.title)
         assertEquals("做作业", first.statusText)
-        assertEquals("2026-11-20 发布", first.detail)
+        assertEquals("发布时间：2026-11-20 08:30 截止时间：2026-11-27 23:59", first.detail)
+        assertEquals("2026-11-27 23:59", first.deadlineText)
+        assertEquals(
+            LocalDateTime.of(2026, 11, 27, 23, 59).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+            first.deadlineAtMs,
+        )
+        assertTrue(first.hasExactDeadline)
         assertEquals(ChaoxingAssessmentStatus.NOT_STARTED, first.status)
         assertEquals(
             "https://mooc1-api.chaoxing.com/work/phone/task-work?courseId=300001&classId=200001&workId=9001",
@@ -132,6 +140,11 @@ class AssessmentServiceTest {
         assertEquals("单元测验", items[1].title)
         assertEquals(ChaoxingAssessmentStatus.NOT_STARTED, items[1].status)
         assertFalse(items[1].isCompleted)
+        assertEquals("2026-12-01 11:00", items[1].deadlineText)
+        assertEquals(
+            LocalDateTime.of(2026, 12, 1, 11, 0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+            items[1].deadlineAtMs,
+        )
     }
 
     @Test
@@ -372,6 +385,62 @@ class AssessmentServiceTest {
             course,
         )
         assertEquals("A & B 测试", items.single().title)
+    }
+
+    @Test
+    fun deadlineParserPrefersKeywordAndRangeEnd() {
+        val zone = ZoneId.systemDefault()
+        val now = LocalDateTime.of(2026, 11, 23, 10, 0).atZone(zone).toInstant().toEpochMilli()
+
+        val keyworded = ChaoxingAssessmentDeadline.extract(
+            "发布时间：2026-11-20 08:30 截止时间：2026-11-27 23:59",
+            now, zone, allowSingleUnkeyed = false,
+        )
+        assertEquals("2026-11-27 23:59", keyworded?.text)
+        assertEquals(
+            LocalDateTime.of(2026, 11, 27, 23, 59).atZone(zone).toInstant().toEpochMilli(),
+            keyworded?.atMs,
+        )
+
+        val range = ChaoxingAssessmentDeadline.extract(
+            "考试时间 2026-12-01 09:00-11:00",
+            now, zone, allowSingleUnkeyed = true,
+        )
+        assertEquals("2026-12-01 11:00", range?.text)
+
+        val shortDate = ChaoxingAssessmentDeadline.extract(
+            "截止 11-27 23:59",
+            now, zone, allowSingleUnkeyed = true,
+        )
+        assertEquals(
+            LocalDateTime.of(2026, 11, 27, 23, 59).atZone(zone).toInstant().toEpochMilli(),
+            shortDate?.atMs,
+        )
+    }
+
+    @Test
+    fun deadlineParserIgnoresPublishOnlyAndDateOnlyWithoutKeyword() {
+        val zone = ZoneId.systemDefault()
+        val now = LocalDateTime.of(2026, 11, 23, 10, 0).atZone(zone).toInstant().toEpochMilli()
+
+        assertNull(
+            ChaoxingAssessmentDeadline.extract(
+                "2026-11-20 08:30 发布",
+                now, zone, allowSingleUnkeyed = false,
+            ),
+        )
+        assertNull(
+            ChaoxingAssessmentDeadline.extract(
+                "2026-11-20 发布",
+                now, zone, allowSingleUnkeyed = false,
+            ),
+        )
+        val dateOnly = ChaoxingAssessmentDeadline.extract(
+            "截止日期 2026-11-27",
+            now, zone, allowSingleUnkeyed = false,
+        )
+        assertEquals("2026-11-27", dateOnly?.text)
+        assertNull(dateOnly?.atMs)
     }
 
     private fun pathDispatcher(work: String, exam: String) = object : Dispatcher() {

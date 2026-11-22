@@ -14,6 +14,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import java.net.URI
+import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.ZoneId
 
 /**
  * 读取一门课程的作业（work）与考试（exam）列表，并给出完成情况。
@@ -154,6 +159,8 @@ object ChaoxingAssessmentService {
         html: String,
         pageUrl: String,
         course: ChaoxingCourse,
+        nowMs: Long = System.currentTimeMillis(),
+        zone: ZoneId = ZoneId.systemDefault(),
     ): List<ChaoxingAssessmentItem> {
         val origin = originOf(pageUrl)
         return WORK_ROW_REGEX.findAll(html).mapNotNull { match ->
@@ -168,11 +175,19 @@ object ChaoxingAssessmentService {
 
             val date = cleanText(innerTag(inner, "p"))
             val action = cleanText(innerTag(inner, "b"))
+            val deadline = ChaoxingAssessmentDeadline.extract(
+                raw = inner,
+                nowMs = nowMs,
+                zone = zone,
+                allowSingleUnkeyed = false,
+            )
             ChaoxingAssessmentItem(
                 kind = ChaoxingAssessmentKind.WORK,
                 title = title,
                 statusText = action,
                 detail = date,
+                deadlineText = deadline?.text,
+                deadlineAtMs = deadline?.atMs,
                 rawStatus = attribute(attributes, "status")?.toIntOrNull() ?: 0,
                 courseId = course.courseId,
                 classId = course.classId,
@@ -187,6 +202,8 @@ object ChaoxingAssessmentService {
         html: String,
         pageUrl: String,
         course: ChaoxingCourse,
+        nowMs: Long = System.currentTimeMillis(),
+        zone: ZoneId = ZoneId.systemDefault(),
     ): List<ChaoxingAssessmentItem> {
         val origin = originOf(pageUrl)
         return EXAM_ROW_REGEX.findAll(html).mapNotNull { match ->
@@ -200,11 +217,19 @@ object ChaoxingAssessmentService {
                 .ifBlank { cells.firstOrNull().orEmpty() }
             if (title.isBlank()) return@mapNotNull null
 
+            val deadline = ChaoxingAssessmentDeadline.extract(
+                raw = inner,
+                nowMs = nowMs,
+                zone = zone,
+                allowSingleUnkeyed = true,
+            )
             ChaoxingAssessmentItem(
                 kind = ChaoxingAssessmentKind.EXAM,
                 title = title,
                 statusText = cells.getOrNull(2).orEmpty(),
                 detail = cells.getOrNull(1).orEmpty(),
+                deadlineText = deadline?.text,
+                deadlineAtMs = deadline?.atMs,
                 rawStatus = attribute(attributes, "status")?.toIntOrNull() ?: 0,
                 courseId = course.courseId,
                 classId = course.classId,
@@ -296,4 +321,131 @@ object ChaoxingAssessmentService {
     private val EMPTY_PAGE_MARKERS = listOf(
         "暂无作业", "暂无考试", "没有作业", "没有考试", "暂无数据", "暂时没有", "无数据",
     )
+}
+
+/** 解析出的截止时间：`text` 用于展示，`atMs` 在只有日期时为 null。 */
+internal data class ChaoxingAssessmentDeadlineInfo(
+    val text: String,
+    val atMs: Long?,
+)
+
+/**
+ * 从列表行文本里提取截止时间，精确到时分。
+ *
+ * 页面没有统一的字段名，因此按「日期时间 + 上下文」判断：
+ * - 命中「截止 / 结束 / 到期 / 有效期」等关键词的时间优先；
+ * - 带「发布 / 创建 / 布置」的时间视为发布时间，排除；
+ * - 形如 `2026-11-27 09:00-11:00` 的区间取结束时间；
+ * - 没有关键词时，作业要求至少两个时间（发布 + 截止）才采信，考试允许单个。
+ *
+ * 只解析页面真实提供的时分；只有日期时返回 `atMs = null`，绝不臆造时间。
+ */
+internal object ChaoxingAssessmentDeadline {
+    private const val CONTEXT = 14
+    private const val HALF_YEAR_MS = 183L * 24 * 60 * 60 * 1000
+
+    private val FULL_DATE_TIME = Regex(
+        """(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})\s*日?\s*[T\s]*(\d{1,2})\s*[:：]\s*(\d{2})""",
+    )
+    private val SHORT_DATE_TIME = Regex(
+        """(?<!\d)(\d{1,2})\s*[-/.月]\s*(\d{1,2})\s*日?\s*(\d{1,2})\s*[:：]\s*(\d{2})""",
+    )
+    private val DATE_ONLY = Regex("""(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})\s*日?""")
+    private val RANGE_TAIL = Regex("""^\s*[-~—–至到]\s*(\d{1,2})\s*[:：]\s*(\d{2})""")
+    private val DEADLINE_MARKERS = listOf("截止", "结束", "到期", "有效期", "最后")
+    private val PUBLISH_MARKERS = listOf("发布", "创建", "布置")
+
+    private data class Candidate(
+        val atMs: Long,
+        val text: String,
+        val keyworded: Boolean,
+        val publishLike: Boolean,
+    )
+
+    fun extract(
+        raw: String,
+        nowMs: Long,
+        zone: ZoneId,
+        allowSingleUnkeyed: Boolean,
+    ): ChaoxingAssessmentDeadlineInfo? {
+        val text = raw.replace('\u00A0', ' ')
+        if (text.isBlank()) return null
+
+        val candidates = mutableListOf<Candidate>()
+        FULL_DATE_TIME.findAll(text).forEach { match ->
+            val date = runCatching {
+                LocalDate.of(match.groupValues[1].toInt(), match.groupValues[2].toInt(), match.groupValues[3].toInt())
+            }.getOrNull() ?: return@forEach
+            var time = runCatching {
+                LocalTime.of(match.groupValues[4].toInt(), match.groupValues[5].toInt())
+            }.getOrNull() ?: return@forEach
+
+            var endIndex = match.range.last
+            val tail = text.substring(endIndex + 1).take(16)
+            RANGE_TAIL.find(tail)?.let { range ->
+                val parsed = runCatching {
+                    LocalTime.of(range.groupValues[1].toInt(), range.groupValues[2].toInt())
+                }.getOrNull()
+                if (parsed != null) {
+                    time = parsed
+                    endIndex += range.range.last + 1
+                }
+            }
+
+            val window = window(text, match.range.first, endIndex)
+            candidates += Candidate(
+                atMs = LocalDateTime.of(date, time).atZone(zone).toInstant().toEpochMilli(),
+                text = "$date $time",
+                keyworded = DEADLINE_MARKERS.any(window::contains),
+                publishLike = PUBLISH_MARKERS.any(window::contains),
+            )
+        }
+
+        if (candidates.isEmpty()) {
+            val now = Instant.ofEpochMilli(nowMs).atZone(zone)
+            SHORT_DATE_TIME.findAll(text).forEach { match ->
+                val month = match.groupValues[1].toInt()
+                val day = match.groupValues[2].toInt()
+                val time = runCatching {
+                    LocalTime.of(match.groupValues[3].toInt(), match.groupValues[4].toInt())
+                }.getOrNull() ?: return@forEach
+                var year = now.year
+                var date = runCatching { LocalDate.of(year, month, day) }.getOrNull() ?: return@forEach
+                var epoch = LocalDateTime.of(date, time).atZone(zone).toInstant().toEpochMilli()
+                if (epoch < nowMs - HALF_YEAR_MS) {
+                    year += 1
+                    date = runCatching { LocalDate.of(year, month, day) }.getOrNull() ?: return@forEach
+                    epoch = LocalDateTime.of(date, time).atZone(zone).toInstant().toEpochMilli()
+                }
+                val window = window(text, match.range.first, match.range.last)
+                candidates += Candidate(
+                    atMs = epoch,
+                    text = "$date $time",
+                    keyworded = DEADLINE_MARKERS.any(window::contains),
+                    publishLike = PUBLISH_MARKERS.any(window::contains),
+                )
+            }
+        }
+
+        if (candidates.isEmpty()) {
+            // 只有日期、没有时分：仅在明确是「截止」且有别于发布信息时采用。
+            DATE_ONLY.findAll(text).lastOrNull { match ->
+                val window = window(text, match.range.first, match.range.last)
+                DEADLINE_MARKERS.any(window::contains) && PUBLISH_MARKERS.none(window::contains)
+            }?.let { return ChaoxingAssessmentDeadlineInfo(it.value, null) }
+            return null
+        }
+
+        val usable = candidates.filterNot { it.publishLike }
+        val chosen = usable.lastOrNull { it.keyworded }
+            ?: usable.lastOrNull()?.takeIf { allowSingleUnkeyed || usable.size >= 2 }
+            ?: return null
+        return ChaoxingAssessmentDeadlineInfo(chosen.text, chosen.atMs)
+    }
+
+    private fun window(text: String, start: Int, end: Int): String {
+        val from = (start - CONTEXT).coerceAtLeast(0)
+        val to = (end + CONTEXT).coerceAtMost(text.length)
+        return text.substring(from, to)
+    }
 }

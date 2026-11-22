@@ -110,6 +110,10 @@ data class ChaoxingAssessmentItem(
     val statusText: String = "",
     /** 次要信息：作业为发布日期，考试为分数。 */
     val detail: String = "",
+    /** 截止时间原文（可能只有日期，也可能精确到时分）。 */
+    val deadlineText: String? = null,
+    /** 截止时间（毫秒）。页面只给日期、没给时分时为 null，不臆造时间。 */
+    val deadlineAtMs: Long? = null,
     /** 页面 `status` 属性原值，两套页面编码不同，仅作保留。 */
     val rawStatus: Int = 0,
     val courseId: Long = 0L,
@@ -133,6 +137,14 @@ data class ChaoxingAssessmentItem(
     /** 界面上优先显示服务端原文，没有原文时退回归一化文案。 */
     val displayStatus: String
         get() = statusText.trim().ifEmpty { status.displayName }
+
+    /** 截止时间是否已知（精确到时分）。 */
+    val hasExactDeadline: Boolean
+        get() = deadlineAtMs != null
+
+    /** 未完成但已过截止时间。 */
+    fun isOverdueAt(nowMs: Long): Boolean =
+        deadlineAtMs?.let { nowMs > it } == true && !status.isCompleted
 }
 
 /**
