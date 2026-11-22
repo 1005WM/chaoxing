@@ -1,0 +1,54 @@
+# macOS / Xcode user state
+.DS_Store
+xcuserdata/
+*.xcuserstate
+
+# Build products and local package state
+.build/
+.swiftpm/
+DerivedData/
+build/
+dist/
+*.xcarchive
+*.xcresult
+*.ipa
+*.dSYM/
+
+# Signing credentials and local configuration
+*.p12
+*.p8
+*.mobileprovision
+*.provisionprofile
+.env
+.env.*
+!.env.example
+
+# Runtime account/session data and exported backups
+state.json
+state.recovery-*.json
+state.enc
+caochaoxing_state.enc
+state.recovery-*.enc
+caochaoxing_full_backup.json
+caochaoxing_presets_backup.json
+Caochaoxing-backup-*.json
+*.log
+
+# Android Gradle / IDE / build outputs & signing keys
+android/.gradle/
+android/.kotlin/
+android/build/
+android/*/build/
+android/.idea/
+android/*.iml
+android/local.properties
+android/captures/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.jks
+*.keystore
+
+# Local workspace metadata
+.superpowers/

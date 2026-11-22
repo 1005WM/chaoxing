@@ -1,0 +1,747 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- Copyright (c) 2026 Pybsama. -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>位置坐标拾取</title>
+  <style>
+    :root {
+      --bg: #f5f5f7;
+      --grid: rgba(0, 90, 190, 0.10);
+      --grid-major: rgba(0, 90, 190, 0.22);
+      --ink: #18181b;
+      --ink-secondary: #5c5c62;
+      --surface: rgba(255, 255, 255, 0.92);
+      --border: #d7d8dd;
+      --accent: #005abe;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1d1d1f;
+        --grid: rgba(112, 174, 255, 0.11);
+        --grid-major: rgba(112, 174, 255, 0.24);
+        --ink: #f5f5f7;
+        --ink-secondary: #b7b7bf;
+        --surface: rgba(42, 42, 45, 0.92);
+        --border: #404044;
+        --accent: #70aeff;
+      }
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    #map {
+      width: 100%;
+      height: 100%;
+      background: var(--bg);
+    }
+
+    #map.grid-backdrop {
+      background-image:
+        linear-gradient(to right, var(--grid) 1px, transparent 1px),
+        linear-gradient(to bottom, var(--grid) 1px, transparent 1px),
+        linear-gradient(to right, var(--grid-major) 1px, transparent 1px),
+        linear-gradient(to bottom, var(--grid-major) 1px, transparent 1px);
+      background-size: 28px 28px, 28px 28px, 140px 140px, 140px 140px;
+    }
+
+    #fallback-wrap {
+      display: none;
+      position: relative;
+      width: 100%;
+      height: 100%;
+      background: var(--bg);
+    }
+
+    #fallback-canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      touch-action: none;
+    }
+
+    .fallback-controls {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      z-index: 10;
+    }
+
+    .fallback-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--ink);
+      font-size: 18px;
+      font-weight: 600;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+
+    .fallback-readout {
+      position: absolute;
+      left: 10px;
+      bottom: 8px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--ink-secondary);
+      font-size: 11px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="fallback-wrap">
+    <canvas id="fallback-canvas"></canvas>
+    <div class="fallback-controls">
+      <button type="button" class="fallback-btn" id="zoom-in" aria-label="放大">+</button>
+      <button type="button" class="fallback-btn" id="zoom-out" aria-label="缩小">−</button>
+    </div>
+    <div class="fallback-readout" id="fallback-readout">WGS-84</div>
+  </div>
+
+  <script>
+    (function () {
+      const state = {
+        lat: 39.9042,
+        lon: 116.4074,
+        title: "签到位置",
+        hasMarker: false,
+        fence: null,
+        mode: "pending",
+        fallbackCenterLat: 39.9042,
+        fallbackCenterLon: 116.4074,
+        fallbackZoom: 16,
+        readyNotified: false,
+        errorNotified: false
+      };
+
+      let leafletMap = null;
+      let leafletMarker = null;
+      let leafletFence = null;
+      let tileLoadCount = 0;
+      let tileErrorCount = 0;
+
+      function isFiniteCoord(lat, lon) {
+        return Number.isFinite(lat) &&
+          Number.isFinite(lon) &&
+          lat >= -90 && lat <= 90 &&
+          lon >= -180 && lon <= 180;
+      }
+
+      function clampLat(lat) {
+        return Math.max(-85.0511, Math.min(85.0511, lat));
+      }
+
+      function wrapLon(lon) {
+        if (!Number.isFinite(lon)) return 0;
+        let v = ((lon + 180) % 360 + 360) % 360 - 180;
+        if (v === -180 && lon > 0) v = 180;
+        return v;
+      }
+
+      function bridge() {
+        return window.AndroidLeafletBridge || null;
+      }
+
+      function notifyReady() {
+        if (state.readyNotified) return;
+        state.readyNotified = true;
+        const b = bridge();
+        if (b && typeof b.onMapReady === "function") {
+          try { b.onMapReady(); } catch (_) {}
+        }
+      }
+
+      function notifyCoordinateSelected(lat, lon) {
+        const cleanLat = clampLat(Number(lat));
+        const cleanLon = wrapLon(Number(lon));
+        if (!isFiniteCoord(cleanLat, cleanLon)) return;
+        const b = bridge();
+        if (b && typeof b.onCoordinateSelected === "function") {
+          try { b.onCoordinateSelected(cleanLat, cleanLon); } catch (_) {}
+        }
+      }
+
+      function notifyError(message) {
+        const b = bridge();
+        if (b && typeof b.onMapError === "function") {
+          try { b.onMapError(String(message || "地图加载受限")); } catch (_) {}
+        }
+      }
+
+      function applyLeafletMarker(lat, lon, title, recenter) {
+        if (!leafletMap || typeof L === "undefined") return;
+        const safeTitle = (typeof title === "string" && title.trim().length > 0)
+          ? title.trim()
+          : "签到位置";
+        if (!leafletMarker) {
+          leafletMarker = L.marker([lat, lon], { draggable: true, title: safeTitle }).addTo(leafletMap);
+          const tooltipEl = document.createElement("span");
+          tooltipEl.textContent = safeTitle;
+          leafletMarker.bindTooltip(tooltipEl, { direction: "top", offset: [0, -14] });
+          leafletMarker.on("dragend", function () {
+            const pos = leafletMarker.getLatLng();
+            state.lat = pos.lat;
+            state.lon = pos.lng;
+            state.hasMarker = true;
+            notifyCoordinateSelected(pos.lat, pos.lng);
+          });
+        } else {
+          leafletMarker.setLatLng([lat, lon]);
+          if (leafletMarker.getTooltip()) {
+            const el = document.createElement("span");
+            el.textContent = safeTitle;
+            leafletMarker.setTooltipContent(el);
+          }
+        }
+        if (recenter) {
+          leafletMap.setView([lat, lon], Math.max(leafletMap.getZoom(), 16), { animate: false });
+        }
+      }
+
+      function applyLeafletFence(fence) {
+        if (!leafletMap || typeof L === "undefined") return;
+        if (!fence) {
+          if (leafletFence) {
+            leafletMap.removeLayer(leafletFence);
+            leafletFence = null;
+          }
+          return;
+        }
+        const radius = Math.max(10, Number(fence.radiusMeters) || 100);
+        if (!leafletFence) {
+          leafletFence = L.circle([fence.lat, fence.lon], {
+            radius: radius,
+            color: "#005abe",
+            fillColor: "#005abe",
+            fillOpacity: 0.14,
+            weight: 1.6
+          }).addTo(leafletMap);
+        } else {
+          leafletFence.setLatLng([fence.lat, fence.lon]);
+          leafletFence.setRadius(radius);
+        }
+      }
+
+      window.setMarker = function (lat, lon, title) {
+        const nLat = Number(lat);
+        const nLon = Number(lon);
+        if (!isFiniteCoord(nLat, nLon)) return;
+        state.lat = nLat;
+        state.lon = nLon;
+        state.hasMarker = true;
+        state.title = (typeof title === "string" && title.trim().length > 0) ? title.trim() : "签到位置";
+        state.fallbackCenterLat = nLat;
+        state.fallbackCenterLon = nLon;
+        if (state.mode === "leaflet") {
+          applyLeafletMarker(nLat, nLon, state.title, true);
+        } else if (state.mode === "fallback") {
+          renderFallback();
+        }
+      };
+
+      window.setFence = function (lat, lon, radiusMeters) {
+        const nLat = Number(lat);
+        const nLon = Number(lon);
+        const nRadius = Number(radiusMeters);
+        if (!isFiniteCoord(nLat, nLon)) return;
+        state.fence = {
+          lat: nLat,
+          lon: nLon,
+          radiusMeters: Number.isFinite(nRadius) && nRadius > 0 ? nRadius : 100
+        };
+        if (!state.hasMarker) {
+          state.fallbackCenterLat = nLat;
+          state.fallbackCenterLon = nLon;
+        }
+        if (state.mode === "leaflet") {
+          applyLeafletFence(state.fence);
+          if (!state.hasMarker && leafletMap) {
+            leafletMap.setView([nLat, nLon], 16, { animate: false });
+          }
+        } else if (state.mode === "fallback") {
+          renderFallback();
+        }
+      };
+
+      window.clearFence = function () {
+        state.fence = null;
+        if (state.mode === "leaflet") {
+          applyLeafletFence(null);
+        } else if (state.mode === "fallback") {
+          renderFallback();
+        }
+      };
+
+      function fallbackMetersPerPixel() {
+        const cosLat = Math.max(0.15, Math.cos(state.fallbackCenterLat * Math.PI / 180));
+        return (156543.03392 * cosLat) / Math.pow(2, state.fallbackZoom);
+      }
+
+      function latLonToCanvasPx(lat, lon, width, height) {
+        const mpp = fallbackMetersPerPixel();
+        const cosLat = Math.max(0.15, Math.cos(state.fallbackCenterLat * Math.PI / 180));
+        const dxMeters = (lon - state.fallbackCenterLon) * 111320 * cosLat;
+        const dyMeters = (lat - state.fallbackCenterLat) * 111320;
+        return {
+          x: width * 0.5 + dxMeters / mpp,
+          y: height * 0.5 - dyMeters / mpp
+        };
+      }
+
+      function canvasPxToLatLon(px, py, width, height) {
+        const mpp = fallbackMetersPerPixel();
+        const cosLat = Math.max(0.15, Math.cos(state.fallbackCenterLat * Math.PI / 180));
+        const dxMeters = (px - width * 0.5) * mpp;
+        const dyMeters = (height * 0.5 - py) * mpp;
+        return {
+          lat: clampLat(state.fallbackCenterLat + dyMeters / 111320),
+          lon: wrapLon(state.fallbackCenterLon + dxMeters / (111320 * cosLat))
+        };
+      }
+
+      function renderFallback() {
+        if (state.mode !== "fallback") return;
+        const canvas = document.getElementById("fallback-canvas");
+        const readout = document.getElementById("fallback-readout");
+        if (!canvas) return;
+        const rect = canvas.getBoundingClientRect();
+        const width = Math.max(1, rect.width);
+        const height = Math.max(1, rect.height);
+        const dpr = window.devicePixelRatio || 1;
+        if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
+          canvas.width = Math.round(width * dpr);
+          canvas.height = Math.round(height * dpr);
+        }
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+
+        ctx.save();
+        ctx.scale(dpr, dpr);
+
+        const isDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+        const bgColor = isDark ? "#1d1d1f" : "#f5f5f7";
+        const gridMinor = isDark ? "rgba(112, 174, 255, 0.11)" : "rgba(0, 90, 190, 0.09)";
+        const gridMajor = isDark ? "rgba(112, 174, 255, 0.24)" : "rgba(0, 90, 190, 0.20)";
+        const accent = isDark ? "#70aeff" : "#005abe";
+        const pinStroke = isDark ? "#18181b" : "#ffffff";
+
+        ctx.fillStyle = bgColor;
+        ctx.fillRect(0, 0, width, height);
+
+        const mpp = fallbackMetersPerPixel();
+        const cosLat = Math.max(0.15, Math.cos(state.fallbackCenterLat * Math.PI / 180));
+        const pxPerDegLon = (111320 * cosLat) / mpp;
+        const pxPerDegLat = 111320 / mpp;
+        const stepLon = 0.0001 * Math.pow(2, Math.round(Math.log2(36 / (0.0001 * pxPerDegLon))));
+        const stepLat = 0.0001 * Math.pow(2, Math.round(Math.log2(36 / (0.0001 * pxPerDegLat))));
+
+        const minLon = state.fallbackCenterLon - (width * 0.5) / pxPerDegLon;
+        const maxLon = state.fallbackCenterLon + (width * 0.5) / pxPerDegLon;
+        const startLonIdx = Math.floor(minLon / stepLon);
+        const endLonIdx = Math.ceil(maxLon / stepLon);
+
+        const minLat = state.fallbackCenterLat - (height * 0.5) / pxPerDegLat;
+        const maxLat = state.fallbackCenterLat + (height * 0.5) / pxPerDegLat;
+        const startLatIdx = Math.floor(minLat / stepLat);
+        const endLatIdx = Math.ceil(maxLat / stepLat);
+
+        ctx.lineWidth = 1;
+        for (let idx = startLonIdx; idx <= endLonIdx; idx++) {
+          const x = width * 0.5 + (idx * stepLon - state.fallbackCenterLon) * pxPerDegLon;
+          ctx.strokeStyle = ((idx % 4) + 4) % 4 === 0 ? gridMajor : gridMinor;
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, height);
+          ctx.stroke();
+        }
+        for (let idx = startLatIdx; idx <= endLatIdx; idx++) {
+          const y = height * 0.5 - (idx * stepLat - state.fallbackCenterLat) * pxPerDegLat;
+          ctx.strokeStyle = ((idx % 4) + 4) % 4 === 0 ? gridMajor : gridMinor;
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(width, y);
+          ctx.stroke();
+        }
+
+        if (state.fence) {
+          const centerPt = latLonToCanvasPx(state.fence.lat, state.fence.lon, width, height);
+          const radiusPx = Math.max(8, state.fence.radiusMeters / fallbackMetersPerPixel());
+          ctx.beginPath();
+          ctx.arc(centerPt.x, centerPt.y, radiusPx, 0, Math.PI * 2);
+          ctx.fillStyle = isDark ? "rgba(112, 174, 255, 0.18)" : "rgba(0, 90, 190, 0.14)";
+          ctx.fill();
+          ctx.lineWidth = 1.6;
+          ctx.strokeStyle = accent;
+          ctx.stroke();
+        }
+
+        const markerLat = state.hasMarker ? state.lat : state.fallbackCenterLat;
+        const markerLon = state.hasMarker ? state.lon : state.fallbackCenterLon;
+        const mPt = latLonToCanvasPx(markerLat, markerLon, width, height);
+
+        ctx.beginPath();
+        ctx.arc(mPt.x, mPt.y, 14, 0, Math.PI * 2);
+        ctx.fillStyle = isDark ? "rgba(112, 174, 255, 0.22)" : "rgba(0, 90, 190, 0.18)";
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(mPt.x, mPt.y, 7.5, 0, Math.PI * 2);
+        ctx.fillStyle = accent;
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = pinStroke;
+        ctx.stroke();
+
+        ctx.restore();
+
+        if (readout) {
+          readout.textContent = "离线网格 · " + markerLat.toFixed(5) + ", " + markerLon.toFixed(5);
+        }
+      }
+
+      let fallbackEventsBound = false;
+      let loadTimeoutId = null;
+
+      function clearLoadTimeout() {
+        if (loadTimeoutId !== null) {
+          clearTimeout(loadTimeoutId);
+          loadTimeoutId = null;
+        }
+      }
+
+      function setupFallbackEvents() {
+        if (fallbackEventsBound) return;
+        const canvas = document.getElementById("fallback-canvas");
+        const zoomIn = document.getElementById("zoom-in");
+        const zoomOut = document.getElementById("zoom-out");
+        if (!canvas) return;
+        fallbackEventsBound = true;
+
+        const activePointers = new Map();
+        let activePointerId = null;
+        let startX = 0;
+        let startY = 0;
+        let lastX = 0;
+        let lastY = 0;
+        let moved = false;
+        let isDraggingMarker = false;
+        let isPanning = false;
+        let dragOriginLat = 0;
+        let dragOriginLon = 0;
+        let dragOriginHasMarker = false;
+        let pinchLastDist = 0;
+
+        function getPinchDistance() {
+          if (activePointers.size < 2) return 0;
+          const iter = activePointers.values();
+          const a = iter.next().value;
+          const b = iter.next().value;
+          return Math.hypot(a.x - b.x, a.y - b.y);
+        }
+
+        function resetPointerState() {
+          activePointerId = null;
+          isDraggingMarker = false;
+          isPanning = false;
+          moved = false;
+        }
+
+        canvas.addEventListener("pointerdown", function (e) {
+          const rect = canvas.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+          activePointers.set(e.pointerId, { x: x, y: y });
+          try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
+
+          if (activePointers.size === 1) {
+            activePointerId = e.pointerId;
+            startX = x;
+            startY = y;
+            lastX = x;
+            lastY = y;
+            moved = false;
+
+            const markerLat = state.hasMarker ? state.lat : state.fallbackCenterLat;
+            const markerLon = state.hasMarker ? state.lon : state.fallbackCenterLon;
+            const mPt = latLonToCanvasPx(markerLat, markerLon, rect.width, rect.height);
+            const dist = Math.hypot(x - mPt.x, y - mPt.y);
+            if (dist <= 26) {
+              isDraggingMarker = true;
+              isPanning = false;
+              dragOriginLat = state.lat;
+              dragOriginLon = state.lon;
+              dragOriginHasMarker = state.hasMarker;
+            } else {
+              isDraggingMarker = false;
+              isPanning = true;
+            }
+          } else if (activePointers.size === 2) {
+            if (isDraggingMarker) {
+              state.lat = dragOriginLat;
+              state.lon = dragOriginLon;
+              state.hasMarker = dragOriginHasMarker;
+              renderFallback();
+            }
+            resetPointerState();
+            moved = true;
+            pinchLastDist = getPinchDistance();
+          }
+        });
+
+        canvas.addEventListener("pointermove", function (e) {
+          if (!activePointers.has(e.pointerId)) return;
+          const rect = canvas.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+          activePointers.set(e.pointerId, { x: x, y: y });
+
+          if (activePointers.size >= 2) {
+            const dist = getPinchDistance();
+            if (pinchLastDist > 10 && dist > 10) {
+              const deltaZoom = Math.log2(dist / pinchLastDist);
+              state.fallbackZoom = Math.max(10, Math.min(19, state.fallbackZoom + deltaZoom));
+              renderFallback();
+            }
+            pinchLastDist = dist;
+            return;
+          }
+
+          if (activePointerId !== e.pointerId) return;
+          if (Math.hypot(x - startX, y - startY) > 4) {
+            moved = true;
+          }
+          if (!moved) return;
+
+          if (isDraggingMarker) {
+            const coord = canvasPxToLatLon(x, y, rect.width, rect.height);
+            state.lat = coord.lat;
+            state.lon = coord.lon;
+            state.hasMarker = true;
+          } else if (isPanning) {
+            const mpp = fallbackMetersPerPixel();
+            const cosLat = Math.max(0.15, Math.cos(state.fallbackCenterLat * Math.PI / 180));
+            const dx = x - lastX;
+            const dy = y - lastY;
+            state.fallbackCenterLat = clampLat(state.fallbackCenterLat + (dy * mpp) / 111320);
+            state.fallbackCenterLon = wrapLon(state.fallbackCenterLon - (dx * mpp) / (111320 * cosLat));
+          }
+          lastX = x;
+          lastY = y;
+          renderFallback();
+        });
+
+        function finishPointer(e) {
+          const wasSinglePointer = activePointers.size === 1 && activePointerId === e.pointerId;
+          const wasDraggingMarker = isDraggingMarker;
+          const wasMoved = moved;
+          activePointers.delete(e.pointerId);
+          try {
+            if (canvas.hasPointerCapture && canvas.hasPointerCapture(e.pointerId)) {
+              canvas.releasePointerCapture(e.pointerId);
+            }
+          } catch (_) {}
+
+          if (wasSinglePointer) {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            if (!wasMoved) {
+              const coord = canvasPxToLatLon(x, y, rect.width, rect.height);
+              state.lat = coord.lat;
+              state.lon = coord.lon;
+              state.hasMarker = true;
+              renderFallback();
+              notifyCoordinateSelected(coord.lat, coord.lon);
+            } else if (wasDraggingMarker) {
+              notifyCoordinateSelected(state.lat, state.lon);
+            }
+          }
+          if (activePointers.size < 2) {
+            pinchLastDist = 0;
+          }
+          if (activePointers.size === 0 || activePointerId === e.pointerId) {
+            resetPointerState();
+          }
+        }
+
+        function cancelPointer(e) {
+          const wasDraggingMarker = isDraggingMarker && activePointerId === e.pointerId;
+          activePointers.delete(e.pointerId);
+          try {
+            if (canvas.hasPointerCapture && canvas.hasPointerCapture(e.pointerId)) {
+              canvas.releasePointerCapture(e.pointerId);
+            }
+          } catch (_) {}
+
+          if (wasDraggingMarker) {
+            state.lat = dragOriginLat;
+            state.lon = dragOriginLon;
+            state.hasMarker = dragOriginHasMarker;
+            renderFallback();
+          }
+          if (activePointers.size < 2) {
+            pinchLastDist = 0;
+          }
+          if (activePointers.size === 0 || activePointerId === e.pointerId) {
+            resetPointerState();
+          }
+        }
+
+        canvas.addEventListener("pointerup", finishPointer);
+        canvas.addEventListener("pointercancel", cancelPointer);
+
+        if (zoomIn) {
+          zoomIn.addEventListener("click", function () {
+            state.fallbackZoom = Math.min(19, state.fallbackZoom + 1);
+            renderFallback();
+          });
+        }
+        if (zoomOut) {
+          zoomOut.addEventListener("click", function () {
+            state.fallbackZoom = Math.max(10, state.fallbackZoom - 1);
+            renderFallback();
+          });
+        }
+        window.addEventListener("resize", renderFallback);
+      }
+
+      window.activateFallback = function (reason) {
+        if (state.mode === "fallback") return;
+        clearLoadTimeout();
+        state.mode = "fallback";
+        const mapEl = document.getElementById("map");
+        const wrapEl = document.getElementById("fallback-wrap");
+        if (mapEl) mapEl.style.display = "none";
+        if (wrapEl) wrapEl.style.display = "block";
+        setupFallbackEvents();
+        renderFallback();
+        if (reason && !state.errorNotified) {
+          state.errorNotified = true;
+          notifyError(reason);
+        }
+        notifyReady();
+      };
+
+      window.initLeafletMap = function () {
+        if (state.mode === "fallback") return;
+        clearLoadTimeout();
+        if (typeof L === "undefined") {
+          window.activateFallback("地图脚本未就绪，已切换离线坐标网格");
+          return;
+        }
+        try {
+          state.mode = "leaflet";
+          const initialLat = state.hasMarker ? state.lat : (state.fence ? state.fence.lat : state.lat);
+          const initialLon = state.hasMarker ? state.lon : (state.fence ? state.fence.lon : state.lon);
+          leafletMap = L.map("map", {
+            zoomControl: true,
+            attributionControl: true
+          }).setView([initialLat, initialLon], 16);
+
+          const tiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            maxZoom: 19,
+            attribution: "&copy; OpenStreetMap"
+          });
+          tiles.on("tileload", function () {
+            tileLoadCount++;
+          });
+          tiles.on("tileerror", function () {
+            tileErrorCount++;
+            if (tileErrorCount >= 4 && tileLoadCount === 0 && !state.errorNotified) {
+              state.errorNotified = true;
+              const mapEl = document.getElementById("map");
+              if (mapEl) mapEl.classList.add("grid-backdrop");
+              notifyError("OSM 地图瓦片不可用，已启用交互网格");
+            }
+          });
+          tiles.addTo(leafletMap);
+
+          leafletMap.on("click", function (e) {
+            state.lat = e.latlng.lat;
+            state.lon = e.latlng.lng;
+            state.hasMarker = true;
+            applyLeafletMarker(e.latlng.lat, e.latlng.lng, state.title, false);
+            notifyCoordinateSelected(e.latlng.lat, e.latlng.lng);
+          });
+
+          if (state.fence) {
+            applyLeafletFence(state.fence);
+          }
+          if (state.hasMarker) {
+            applyLeafletMarker(state.lat, state.lon, state.title, true);
+          }
+          notifyReady();
+        } catch (err) {
+          window.activateFallback("地图初始化失败，已切换离线坐标网格");
+        }
+      };
+
+      loadTimeoutId = setTimeout(function () {
+        loadTimeoutId = null;
+        if (state.mode === "pending") {
+          window.activateFallback("地图资源加载超时，已切换离线坐标网格");
+        }
+      }, 4500);
+
+      (function loadLeafletAssets() {
+        const head = document.head || document.getElementsByTagName("head")[0];
+        if (head) {
+          const cssLink = document.createElement("link");
+          cssLink.rel = "stylesheet";
+          cssLink.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+          cssLink.onload = function () {
+            if (leafletMap && state.mode === "leaflet") {
+              try {
+                leafletMap.invalidateSize(false);
+              } catch (_) {}
+            }
+          };
+          head.appendChild(cssLink);
+        }
+
+        const script = document.createElement("script");
+        script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+        script.async = true;
+        script.onload = function () {
+          if (window.initLeafletMap) {
+            window.initLeafletMap();
+          }
+        };
+        script.onerror = function () {
+          if (window.activateFallback) {
+            window.activateFallback("无法连接地图资源，已切换离线坐标网格");
+          }
+        };
+        (document.body || head || document.documentElement).appendChild(script);
+      })();
+    })();
+  </script>
+</body>
+</html>

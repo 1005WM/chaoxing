@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- Copyright (c) 2026 Pybsama. -->
+<resources>
+    <style name="Theme.Caochaoxing" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#F8F7F3</item>
+        <item name="android:statusBarColor">#F8F7F3</item>
+        <item name="android:navigationBarColor">#F8F7F3</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>
