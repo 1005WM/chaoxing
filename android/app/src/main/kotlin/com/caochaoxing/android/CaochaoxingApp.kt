@@ -6,6 +6,7 @@ package com.caochaoxing.android
 import android.app.Application
 import android.content.Context
 import com.caochaoxing.android.state.AndroidAppState
+import com.caochaoxing.android.state.AssessmentController
 import com.caochaoxing.android.state.CourseStudyController
 import com.caochaoxing.android.state.EncryptedFilePersistenceStore
 import com.caochaoxing.android.state.LiveAppStateDependencies
@@ -31,6 +32,9 @@ class CaochaoxingApp : Application() {
     lateinit var courseStudyController: CourseStudyController
         private set
 
+    lateinit var assessmentController: AssessmentController
+        private set
+
     override fun onCreate() {
         super.onCreate()
         persistenceStore = EncryptedFilePersistenceStore(this)
@@ -44,12 +48,17 @@ class CaochaoxingApp : Application() {
             appState = appState,
             scope = applicationScope,
         )
+        assessmentController = AssessmentController(
+            appState = appState,
+            scope = applicationScope,
+        )
         applicationScope.launch {
             appState.uiState
                 .map { it.activePhoneNumber }
                 .distinctUntilChanged()
                 .collect { phone ->
                     courseStudyController.onAccountChanged(phone)
+                    assessmentController.onAccountChanged(phone)
                 }
         }
         applicationScope.launch {

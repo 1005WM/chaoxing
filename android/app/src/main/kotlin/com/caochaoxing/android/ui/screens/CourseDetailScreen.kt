@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.Assignment
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material.icons.rounded.Check
@@ -56,6 +57,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.caochaoxing.android.CaochaoxingApp
 import com.caochaoxing.android.state.AndroidAppState
+import com.caochaoxing.android.state.AssessmentController
 import com.caochaoxing.android.state.CourseStudyController
 import com.caochaoxing.android.ui.components.CxBadge
 import com.caochaoxing.android.ui.components.CxFlowRow
@@ -69,6 +71,7 @@ import kotlinx.coroutines.launch
 
 private const val COURSE_SUBTAB_SIGN = 0
 private const val COURSE_SUBTAB_STUDY = 1
+private const val COURSE_SUBTAB_ASSESSMENT = 2
 
 /**
  * Course detail screen cleanly separating sign-in activities and legal course video/document study.
@@ -91,6 +94,11 @@ fun CourseDetailScreen(
             ?: CourseStudyController(appState = appState, scope = appScope)
     }
     val studyState by resolvedStudyController.uiState.collectAsStateWithLifecycle()
+    val resolvedAssessmentController = remember(appState, context, appScope) {
+        (context.applicationContext as? CaochaoxingApp)?.assessmentController
+            ?: AssessmentController(appState = appState, scope = appScope)
+    }
+    val assessmentState by resolvedAssessmentController.uiState.collectAsStateWithLifecycle()
 
     val course = remember(uiState.courses, courseKey) {
         uiState.courses.firstOrNull { it.id == courseKey }
@@ -121,6 +129,9 @@ fun CourseDetailScreen(
         if (selectedSubTab == COURSE_SUBTAB_STUDY) {
             resolvedStudyController.loadChapters(target)
         }
+        if (selectedSubTab == COURSE_SUBTAB_ASSESSMENT) {
+            resolvedAssessmentController.load(target)
+        }
     }
 
     fun triggerRefresh() {
@@ -128,6 +139,10 @@ fun CourseDetailScreen(
         if (isRefreshing) return
         if (selectedSubTab == COURSE_SUBTAB_STUDY) {
             resolvedStudyController.loadChapters(target, forceRefresh = true)
+            return
+        }
+        if (selectedSubTab == COURSE_SUBTAB_ASSESSMENT) {
+            resolvedAssessmentController.load(target, forceRefresh = true)
             return
         }
         appScope.launch {
@@ -185,11 +200,19 @@ fun CourseDetailScreen(
                         }
                         IconButton(
                             onClick = { triggerRefresh() },
-                            enabled = !isRefreshing && !(if (selectedSubTab == COURSE_SUBTAB_SIGN) isLoading else isLoadingChapters),
+                            enabled = !isRefreshing && !when (selectedSubTab) {
+                                COURSE_SUBTAB_SIGN -> isLoading
+                                COURSE_SUBTAB_STUDY -> isLoadingChapters
+                                else -> assessmentState.isLoading
+                            },
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.Refresh,
-                                contentDescription = if (selectedSubTab == COURSE_SUBTAB_SIGN) "刷新活动" else "刷新章节",
+                                contentDescription = when (selectedSubTab) {
+                                    COURSE_SUBTAB_SIGN -> "刷新活动"
+                                    COURSE_SUBTAB_STUDY -> "刷新章节"
+                                    else -> "刷新作业与考试"
+                                },
                                 tint = CxPalette.accent,
                             )
                         }
@@ -199,7 +222,9 @@ fun CourseDetailScreen(
         },
     ) { innerPadding ->
         PullToRefreshBox(
-            isRefreshing = isRefreshing || (selectedSubTab == COURSE_SUBTAB_STUDY && isLoadingChapters),
+            isRefreshing = isRefreshing ||
+                (selectedSubTab == COURSE_SUBTAB_STUDY && isLoadingChapters) ||
+                (selectedSubTab == COURSE_SUBTAB_ASSESSMENT && assessmentState.isLoading),
             onRefresh = { triggerRefresh() },
             modifier = Modifier
                 .fillMaxSize()
@@ -245,7 +270,7 @@ fun CourseDetailScreen(
                             SegmentedButton(
                                 selected = selectedSubTab == COURSE_SUBTAB_SIGN,
                                 onClick = { selectedSubTab = COURSE_SUBTAB_SIGN },
-                                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 3),
                                 colors = SegmentedButtonDefaults.colors(
                                     activeContainerColor = CxPalette.accent.copy(alpha = 0.14f),
                                     activeContentColor = CxPalette.accent,
@@ -263,7 +288,7 @@ fun CourseDetailScreen(
                                 },
                                 label = {
                                     Text(
-                                        text = if (pendingCount > 0) "签到活动 ($pendingCount)" else "签到活动",
+                                        text = if (pendingCount > 0) "签到 ($pendingCount)" else "签到",
                                         maxLines = 1,
                                     )
                                 },
@@ -271,7 +296,7 @@ fun CourseDetailScreen(
                             SegmentedButton(
                                 selected = selectedSubTab == COURSE_SUBTAB_STUDY,
                                 onClick = { selectedSubTab = COURSE_SUBTAB_STUDY },
-                                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 3),
                                 colors = SegmentedButtonDefaults.colors(
                                     activeContainerColor = CxPalette.accent.copy(alpha = 0.14f),
                                     activeContentColor = CxPalette.accent,
@@ -290,10 +315,37 @@ fun CourseDetailScreen(
                                 label = {
                                     Text(
                                         text = if (studyState.isWatching) {
-                                            "课程看课 (${studyState.activeWorkers.size}路)"
+                                            "看课 (${studyState.activeWorkers.size}路)"
                                         } else {
-                                            "课程看课"
+                                            "看课"
                                         },
+                                        maxLines = 1,
+                                    )
+                                },
+                            )
+                            SegmentedButton(
+                                selected = selectedSubTab == COURSE_SUBTAB_ASSESSMENT,
+                                onClick = { selectedSubTab = COURSE_SUBTAB_ASSESSMENT },
+                                shape = SegmentedButtonDefaults.itemShape(index = 2, count = 3),
+                                colors = SegmentedButtonDefaults.colors(
+                                    activeContainerColor = CxPalette.accent.copy(alpha = 0.14f),
+                                    activeContentColor = CxPalette.accent,
+                                    inactiveContainerColor = CxPalette.surface,
+                                    inactiveContentColor = CxPalette.inkSecondary,
+                                    activeBorderColor = CxPalette.accent.copy(alpha = 0.4f),
+                                    inactiveBorderColor = CxPalette.border,
+                                ),
+                                icon = {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Rounded.Assignment,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                },
+                                label = {
+                                    val pending = assessmentState.summary?.pendingCount ?: 0
+                                    Text(
+                                        text = if (pending > 0) "作业/考试 ($pending)" else "作业/考试",
                                         maxLines = 1,
                                     )
                                 },
@@ -322,6 +374,12 @@ fun CourseDetailScreen(
                         },
                         showLogs = showStudyLogs,
                         onToggleLogs = { showStudyLogs = !showStudyLogs },
+                    )
+                } else if (selectedSubTab == COURSE_SUBTAB_ASSESSMENT) {
+                    courseAssessmentItems(
+                        course = course,
+                        state = assessmentState,
+                        onRetry = { resolvedAssessmentController.load(course, forceRefresh = true) },
                     )
                 } else {
                     item(key = "activities_header") {

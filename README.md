@@ -10,13 +10,13 @@
 
 ![项目封面：蓝色短发的动画角色站在咖啡机前](docs/artwork/project-cover.jpg)
 
-Caochaoxing 是一个面向 **macOS、iOS / iPadOS 和 Android** 的非官方学习通客户端。你可以用自己的账号查看课程、群聊、课堂签到活动和章节任务点。Apple 两端提供课程视频和直播回放的内嵌播放器。Android 可查看任务进度，也可从有原网页链接的回放进入浏览器。
+Caochaoxing 是一个面向 **macOS、iOS / iPadOS 和 Android** 的非官方学习通客户端。你可以用自己的账号查看课程、群聊、课堂签到活动和章节任务点。Apple 两端提供课程视频和直播回放的内嵌播放器。Android 可查看任务进度，也可从有原网页链接的回放进入浏览器；本 fork 的 Android 端还提供课程**作业 / 考试**的只读列表与完成情况统计（见[作业 / 考试](#本-fork-新增作业--考试android)）。
 
 > **代签功能尚未经过大范围测试，实际考勤效果仍待验证。** 如果遇到问题，欢迎在本仓库的 **Issues → New issue** 反馈。请写明设备、版本、操作步骤及预期和实际结果，并隐去账号、Cookie、课堂二维码等个人信息。详见[反馈与贡献](#反馈与贡献)。
 
 - **macOS 桌面端（`CaochaoxingMac`）**：原生 Swift 6 / SwiftUI 桌面应用，支持多账号快捷切换（顶栏菜单、侧边栏、设置页、`⌥⌘1..9` 快捷键）、完整 5 类签到/签退/独立扫码/本地滑块与底库人脸核验，以及内嵌视频播放器与多路合法同步看课引擎（默认仅看当前选中课程，支持可选开启跨课程自动匹配）。
 - **iOS / iPadOS 端（`CaochaoxingIOS`）**：使用 Swift 6 / SwiftUI 与本地 Swift Package `ChaoxingCore`，支持 **iPadOS 双栏 `NavigationSplitView` 与多列并行视频网格**、顶栏多账号快捷切换菜单、完整 5 类签到工作台，以及与 macOS / Android 对齐的「课程看课」分栏（支持 1/2/3/5 路并发、普通视频/音频、`zhibo.chaoxing.com` 外站直播回放并行播放与 HLS→MP4 自动回退、PDF/文档一键完成、全屏视频预览、403 自动限流降级与防息屏）。
-- **Android 端（`android/`）**：使用 Kotlin 2.0.21 / Jetpack Compose（Material 3）与纯 JVM 核心模块 `:core`（`com.caochaoxing.core`）。提供签到工作台、课程章节和多任务进度面板。回放原网页通过浏览器打开。地图使用开放数据，扫码使用 CameraX 和 ZXing。
+- **Android 端（`android/`）**：使用 Kotlin 2.0.21 / Jetpack Compose（Material 3）与纯 JVM 核心模块 `:core`（`com.caochaoxing.core`）。提供签到工作台、课程章节和多任务进度面板，以及本 fork 新增的**作业 / 考试**只读分栏。回放原网页通过浏览器打开。地图使用开放数据，扫码使用 CameraX 和 ZXing。
 
 本项目参考并改写了 [aquamarine5/ChaoxingSignFaker](https://github.com/aquamarine5/ChaoxingSignFaker) 的部分协议实现，采用 **AGPL-3.0-only** 发布；详见 [LICENSE](LICENSE) 与 [来源和版权说明](THIRD_PARTY_NOTICES.md)。本项目由 Pybsama 维护，与超星、学校及上游作者没有官方隶属或背书关系。
 
@@ -44,7 +44,7 @@ Caochaoxing 是一个面向 **macOS、iOS / iPadOS 和 Android** 的非官方学
 | 环境 | 已验证的范围 |
 | --- | --- |
 | iOS / iPadOS | Xcode 26.3 完成通用模拟器 Release 编译、链接及资源打包，并在全新的 iPhone 17 模拟器启动至登录页。此前的授权账号登录及课程、活动读取见 [iOS 验证记录](docs/VALIDATION.md)。 |
-| Android | 90 项单元测试通过，Debug 和未签名 Release APK 均构建成功。Lint 有 12 个警告、0 个错误。API 35 模拟器通过 6 项设备测试，覆盖活动详情与重试、三种活动状态、系统存储和密码表单重建。模拟活动提交次数为 0。[活动导航测试](android/app/src/androidTest/kotlin/com/caochaoxing/android/SimulatedActivityNavigationTest.kt) · [密码表单测试](android/app/src/androidTest/kotlin/com/caochaoxing/android/PasswordRecreationTest.kt) · [此前的授权账号验证](docs/ANDROID_UI_VALIDATION.md) |
+| Android | 本 fork：`:core` 78 项 + `:app` 28 项单元测试通过（含作业/考试 12 项解析测试 + 4 项控制器测试），Debug APK 构建成功；未重跑 Lint 与设备测试，也未在真实账号核对作业/考试接口。上游记录：Lint 12 个警告、0 个错误，API 35 模拟器 6 项设备测试通过。[活动导航测试](android/app/src/androidTest/kotlin/com/caochaoxing/android/SimulatedActivityNavigationTest.kt) · [密码表单测试](android/app/src/androidTest/kotlin/com/caochaoxing/android/PasswordRecreationTest.kt) · [此前的授权账号验证](docs/ANDROID_UI_VALIDATION.md) |
 | macOS / Swift Package | 122 项 Swift 测试通过，覆盖共享库、iOS 状态控制器和 macOS 账号操作。macOS Release 可执行文件构建及本地签名校验通过。回放测试使用模拟响应，本轮未核对线上学习记录。[macOS 回归测试](Tests/CaochaoxingMacTests/MacAppStateRegressionTests.swift) |
 
 欢迎在自己的设备上试用，并通过 GitHub Issues 反馈成功或失败的结果。如果希望验证提交后的记录，请使用由教师或管理员明确授权、与正式考勤隔离的测试班级和测试账号，并请组织者核对后台记录。
@@ -67,12 +67,24 @@ Caochaoxing 是一个面向 **macOS、iOS / iPadOS 和 Android** 的非官方学
   - 系统选图识别二维码（iOS 使用 `PhotosPicker`；Android 使用 `PickVisualMedia`，无需宽泛相册读取权限）与文本/链接粘贴解析（三端均支持）。
   - 拍照防重复处理（Android `AndroidImageObfuscator` 支持 EXIF 方向归一化、微裁切与缩放、稀疏像素扰动及 JPEG `COM` 注释块写入）。
 - **滑块验证**：三端统一使用本地像素边缘梯度匹配自动识别（纯代码计算，不使用 ONNX 推理），自动识别失败时回退手动滑块弹窗，并支持多账号并发验证排队。
+- **作业与考试（本 fork，仅 Android）**：课程详情新增「作业/考试」分栏，只读读取该课程全部作业与考试，展示服务端原文状态（未交 / 待批阅 / 已批阅 / 已过期等）与汇总统计（未完成、已完成、已过期、状态未知）。不打开做题页、不提交、不修改服务端状态。数据源与解析边界见 [docs/ANDROID_ASSESSMENTS.md](docs/ANDROID_ASSESSMENTS.md)。
 - **数据安全与备份**：
   - iOS 在应用沙盒内保存 `state.json`。按下方命令构建的 macOS 版将会话保存在当前用户的 `~/Library/Application Support/Caochaoxing/state.json`，文件权限为 `0600`。Android 使用 **Android Keystore AES-256-GCM** 加密存储 `filesDir/caochaoxing/state.enc`。
   - 本地保留最近 100 条签到历史。iOS 和 Android 支持导入、导出格式兼容的 JSON 备份，默认不含账号凭据。Android 使用系统文件选择器。
   - iOS 和 Android 支持通过 `caochaoxing://` 打开活动或导入二维码内容。
 
 界面遵循各自平台原生规范（macOS / iOS 原生 SwiftUI / Android Material 3 Edge-to-Edge），提供一致的中性画布与强调色、无障碍语义状态与清晰对比度。
+
+## 本 fork 新增：作业 / 考试（Android）
+
+课程详情页在「签到」「看课」之外新增第三个分栏，只读读取这门课的全部作业与考试：
+
+- **数据源**：`/phone/moocAnalysis/workList` 与 `/phone/moocAnalysis/examList`（同源 Cookie；首选 `mooc1-api.chaoxing.com`，失败回退 `mooc1` / `mooc1-2`）。
+- **展示**：服务端原文状态 + 统一归类（未完成 / 进行中 / 已提交 / 待批阅 / 已批阅 / 已过期 / 状态未知），以及未完成 / 已完成 / 已过期统计。
+- **边界**：只读，不打开做题页、不提交、不修改服务端状态；单边接口失败时保留另一边结果并提示。
+- 详细页面结构、解析规则与已知限制见 [docs/ANDROID_ASSESSMENTS.md](docs/ANDROID_ASSESSMENTS.md)。
+
+该功能基于未公开的 H5 页面结构，尚未在真实账号上核对接通结果；解析失败会明确报错，不会伪装成「没有作业」。
 
 ## 零密钥开放地图与三坐标系协作（Android）
 
@@ -198,7 +210,7 @@ android/
       gradle-wrapper.properties        Gradle 8.10.2 分发配置与 SHA-256
       gradle-wrapper.jar               Gradle Wrapper 启动器
   gradlew / gradlew.bat                 macOS / Linux 与 Windows 构建入口
-  core/                                纯 JVM Kotlin 核心库（模型、OkHttp、加解密、签到与课程看课协议服务、坐标转换、测试）
+  core/                                纯 JVM Kotlin 核心库（模型、OkHttp、加解密、签到与课程看课协议服务、作业/考试读取、坐标转换、测试）
   app/                                 Android Jetpack Compose 应用（签到工作台、课程看课引擎、AES-GCM 存储、CameraX、WebView Leaflet）
 .github/workflows/
   android-ci.yml                       Android 单元测试与 Debug APK 自动构建工作流

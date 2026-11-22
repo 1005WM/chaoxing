@@ -52,7 +52,16 @@ internal data class ChaoxingEndpoints(
     val mooc2Base: String = "https://mooc2-ans.chaoxing.com",
     val zhiboBase: String = "https://zhibo.chaoxing.com",
     val gasClazzTreeBase: String = "https://mooc1-api.chaoxing.com/gas/clazz",
+    val assessmentBase: String = "https://mooc1-api.chaoxing.com/phone/moocAnalysis",
+    val assessmentFallbackBases: List<String> = listOf(
+        "https://mooc1.chaoxing.com/phone/moocAnalysis",
+        "https://mooc1-2.chaoxing.com/phone/moocAnalysis",
+    ),
 ) {
+    /** 作业 / 考试列表的候选主机：首选 api 网关，失败时依次回退。 */
+    val assessmentBases: List<String>
+        get() = listOf(assessmentBase) + assessmentFallbackBases
+
     companion object {
         internal val PRODUCTION: ChaoxingEndpoints = ChaoxingEndpoints()
 
@@ -86,6 +95,8 @@ internal data class ChaoxingEndpoints(
                 mooc2Base = base,
                 zhiboBase = base,
                 gasClazzTreeBase = "$base/gas/clazz",
+                assessmentBase = "$base/phone/moocAnalysis",
+                assessmentFallbackBases = emptyList(),
             )
         }
     }
