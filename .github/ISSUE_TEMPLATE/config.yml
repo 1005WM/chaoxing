@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (c) 2026 Pybsama.
+
+blank_issues_enabled: true
+contact_links:
+  - name: GitHub Discussions（使用交流 / TestFlight 等候 / 经验分享）
+    url: https://github.com/Pybsama/Caochaoxing/discussions
+    about: 一般性提问、使用心得交流或日常讨论请前往 Discussions。

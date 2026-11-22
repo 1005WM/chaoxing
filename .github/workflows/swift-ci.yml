@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (c) 2026 Pybsama.
+
+name: Swift CI
+
+on:
+  push:
+    paths:
+      - 'Package.swift'
+      - 'Sources/**'
+      - 'Tests/**'
+      - '.github/workflows/swift-ci.yml'
+  pull_request:
+    paths:
+      - 'Package.swift'
+      - 'Sources/**'
+      - 'Tests/**'
+      - '.github/workflows/swift-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  test-and-build-mac:
+    runs-on: macos-15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show Swift toolchain version
+        run: swift --version
+
+      - name: Run Swift test suite
+        run: swift test
+
+      - name: Build macOS release binary
+        run: swift build -c release --product CaochaoxingMac

@@ -1,0 +1,77 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (c) 2026 Pybsama.
+
+name: Bug / 签到与刷课实测反馈
+description: 反馈异常问题，或汇报在自己设备 / 授权测试班级中的实测结果
+title: "[反馈] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！提交前请务必**隐去手机号、密码、Cookie、学号、学校名称及课堂二维码**等个人敏感信息，也不要上传本地备份 JSON 文件。
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 使用平台
+      options:
+        - Android
+        - macOS
+        - iOS
+        - iPadOS
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 涉及模块
+      options:
+        - 签到 / 签退（普通/拍照/二维码/手势/位置/签到码）
+        - 滑块验证 / 人脸核验
+        - 课程看课 / 外站直播回放 / 文档任务点
+        - 登录 / 多账号切换 / 会话恢复
+        - 群聊 / 雷达 / 界面与备份
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: 设备、系统版本与项目版本
+      description: 例如：Android 15 + v1.0.0 APK，或 macOS 15.2 (M2) + commit 3a7112b
+      placeholder: 请填写设备型号、系统版本和 App 版本
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 操作步骤与预期结果
+      description: 请尽量写明做了哪些操作，以及你原本预期发生什么。
+      placeholder: |
+        1. 打开...
+        2. 点击...
+        3. 预期结果：...
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果（客户端提示 / 后台核对记录）
+      description: 如在教师或管理员授权的独立测试班级核验过签到，请分别写明客户端提示和教师后台记录。
+      placeholder: |
+        - 客户端提示：...
+        - 后台记录（如有）：...
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: 隐私脱敏确认
+      options:
+        - label: 我已确认文中及截图中不包含真实账号、密码、Cookie、课堂二维码或未脱敏备份文件
+          required: true

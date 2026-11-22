@@ -1,5 +1,13 @@
 # Caochaoxing
 
+[![Release](https://img.shields.io/github/v/release/Pybsama/Caochaoxing?label=Release&color=2563eb)](https://github.com/Pybsama/Caochaoxing/releases/latest)
+[![Android CI](https://github.com/Pybsama/Caochaoxing/actions/workflows/android-ci.yml/badge.svg)](https://github.com/Pybsama/Caochaoxing/actions/workflows/android-ci.yml)
+[![Swift CI](https://github.com/Pybsama/Caochaoxing/actions/workflows/swift-ci.yml/badge.svg)](https://github.com/Pybsama/Caochaoxing/actions/workflows/swift-ci.yml)
+[![License: AGPL-3.0-only](https://img.shields.io/badge/License-AGPL--3.0--only-orange.svg)](LICENSE)
+![Platforms](https://img.shields.io/badge/Platforms-macOS%20%7C%20iOS%20%7C%20iPadOS%20%7C%20Android-2ea44f)
+
+> **快速下载**：前往 [**GitHub Releases**](https://github.com/Pybsama/Caochaoxing/releases/latest) 直接获取 **Android 安装包（APK）** 与 **macOS（Apple Silicon `.app.zip`）**；iOS / iPadOS 目前可通过 Xcode 自行签名安装，后续计划开放 TestFlight。
+
 ![项目封面：蓝色短发的动画角色站在咖啡机前](docs/artwork/project-cover.jpg)
 
 Caochaoxing 是一个面向 **macOS、iOS / iPadOS 和 Android** 的非官方学习通客户端。你可以用自己的账号查看课程、群聊、课堂签到活动和章节任务点。Apple 两端提供课程视频和直播回放的内嵌播放器。Android 可查看任务进度，也可从有原网页链接的回放进入浏览器。

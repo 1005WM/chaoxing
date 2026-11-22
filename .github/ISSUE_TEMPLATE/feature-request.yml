@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (c) 2026 Pybsama.
+
+name: 功能建议
+description: 提出新功能想法或交互体验改进建议
+title: "[建议] "
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 目标平台
+      options:
+        - 全平台（macOS / iOS / iPadOS / Android）
+        - Android
+        - macOS
+        - iOS / iPadOS
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你遇到了什么痛点或场景？
+      placeholder: 请描述具体使用场景，以及现有功能为什么不够方便。
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: 你期望的改进方式
+      placeholder: 描述你希望新增或调整的功能行为。
+    validations:
+      required: true
