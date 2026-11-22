@@ -3,6 +3,7 @@
 
 package com.caochaoxing.android.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -25,11 +26,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.caochaoxing.android.state.AssessmentSampleExporter
 import com.caochaoxing.android.state.CourseAssessmentUiState
 import com.caochaoxing.android.ui.components.CxBadge
 import com.caochaoxing.android.ui.components.CxFlowRow
@@ -41,6 +45,9 @@ import com.caochaoxing.android.ui.theme.CxTypography
 import com.caochaoxing.core.model.ChaoxingAssessmentItem
 import com.caochaoxing.core.model.ChaoxingAssessmentKind
 import com.caochaoxing.core.model.ChaoxingCourse
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -88,6 +95,7 @@ fun LazyListScope.courseAssessmentItems(
                         color = CxPalette.inkSecondary,
                     )
                     TextButton(onClick = onRetry) { Text("重试") }
+                    ExportSampleButton(state = state)
                 }
 
                 else -> Text(
@@ -207,6 +215,12 @@ private fun AssessmentOverviewCard(state: CourseAssessmentUiState) {
         val nextDeadline = summary?.items
             ?.filter { it.status.isPending && it.deadlineAtMs != null }
             ?.minByOrNull { it.deadlineAtMs ?: Long.MAX_VALUE }
+        val unknownCount = summary?.unknownCount ?: 0
+        val missingDeadline = summary?.items
+            ?.any { it.status.isPending && it.deadlineAtMs == null } == true
+        if (unknownCount > 0 || missingDeadline || state.errorMessage != null) {
+            ExportSampleButton(state = state)
+        }
         if (nextDeadline?.deadlineAtMs != null) {
             val at = nextDeadline.deadlineAtMs!!
             Text(
@@ -274,6 +288,34 @@ private fun AssessmentRow(item: ChaoxingAssessmentItem) {
             )
         }
         HorizontalDivider(color = CxPalette.border, thickness = 0.5.dp)
+    }
+}
+
+/**
+ * 页面结构与预期不符（状态无法识别、整页解析失败）时，允许用户把该次请求的页面片段
+ * 保存到「下载/DSH-Go」，便于对照修正。内容只写本机文件，不上传。
+ */
+@Composable
+private fun ExportSampleButton(state: CourseAssessmentUiState) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val sample = state.sampleText
+    if (sample.isNullOrBlank()) return
+    TextButton(
+        onClick = {
+            scope.launch {
+                val path = withContext(Dispatchers.IO) {
+                    AssessmentSampleExporter.export(context, sample)
+                }
+                Toast.makeText(
+                    context,
+                    if (path != null) "已保存到 $path" else "保存失败（需要 Android 10 及以上）",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        },
+    ) {
+        Text("导出页面样本（仅本机）", style = MaterialTheme.typography.bodySmall)
     }
 }
 

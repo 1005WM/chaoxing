@@ -161,7 +161,7 @@ class AssessmentServiceTest {
             "已批阅" to ChaoxingAssessmentStatus.REVIEWED,
             "已过期" to ChaoxingAssessmentStatus.EXPIRED,
             "缺考" to ChaoxingAssessmentStatus.EXPIRED,
-            "查看" to ChaoxingAssessmentStatus.UNKNOWN,
+            "查看" to ChaoxingAssessmentStatus.SUBMITTED,
             "" to ChaoxingAssessmentStatus.UNKNOWN,
         )
 
@@ -385,6 +385,31 @@ class AssessmentServiceTest {
             course,
         )
         assertEquals("A & B 测试", items.single().title)
+    }
+
+    @Test
+    fun workStatusFallsBackToSpanAndReadsAttributeDeadline() {
+        val html = """
+            <dt data="work/phone/task-work?workId=9101" data-endtime="2026-12-02 18:00">
+              <h3>实验报告</h3>
+              <p>2026-11-20</p>
+              <span class="status">已完成</span>
+            </dt>
+        """.trimIndent()
+        val items = ChaoxingAssessmentService.parseWorkListHtml(
+            html,
+            "https://mooc1-api.chaoxing.com/phone/moocAnalysis/workList",
+            course,
+        )
+
+        assertEquals(1, items.size)
+        assertEquals("已完成", items[0].statusText)
+        assertTrue(items[0].isCompleted)
+        assertEquals("2026-12-02 18:00", items[0].deadlineText)
+        assertEquals(
+            LocalDateTime.of(2026, 12, 2, 18, 0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+            items[0].deadlineAtMs,
+        )
     }
 
     @Test

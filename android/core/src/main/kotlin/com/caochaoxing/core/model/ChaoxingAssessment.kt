@@ -68,7 +68,8 @@ enum class ChaoxingAssessmentStatus(val displayName: String) {
         private val EXPIRED_KEYWORDS = listOf("已过期", "过期", "已结束", "已截止", "缺考", "未参加")
         /** 带否定前缀的「还没做」，必须先于「完成」判断，否则「未完成」会命中「完成」。 */
         private val NEGATED_PENDING_KEYWORDS = listOf("未完成", "未交", "未提交", "未开始", "未做", "未作答", "未考")
-        private val SUBMITTED_KEYWORDS = listOf("已交卷", "已提交", "已交", "已作答", "已完成", "已通过", "完成")
+        // 「查看」是学习通作业/考试已提交后的入口文案（未提交时是「做作业」）。
+        private val SUBMITTED_KEYWORDS = listOf("已交卷", "已提交", "已交", "已作答", "已完成", "已通过", "完成", "查看")
         private val IN_PROGRESS_KEYWORDS = listOf("进行中", "考试中", "作答中", "正在")
         private val NOT_STARTED_KEYWORDS = listOf(
             "去完成", "去做", "做作业", "开始考试", "参加考试", "待完成", "待考试", "待作答", "立即",

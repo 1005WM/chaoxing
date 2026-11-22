@@ -59,7 +59,7 @@ class AssessmentControllerTest {
         val controller = AssessmentController(
             clientProvider = { client() },
             scope = this,
-            fetchSummary = { _, _ ->
+            fetchSummary = { _, _, _ ->
                 calls += 1
                 summaryOf(2)
             },
@@ -85,7 +85,7 @@ class AssessmentControllerTest {
         val controller = AssessmentController(
             clientProvider = { client() },
             scope = this,
-            fetchSummary = { _, _ ->
+            fetchSummary = { _, _, _ ->
                 if (fail) throw ChaoxingError.NetworkError("网络断了")
                 summaryOf(1)
             },
@@ -109,7 +109,7 @@ class AssessmentControllerTest {
         val controller = AssessmentController(
             clientProvider = { client() },
             scope = this,
-            fetchSummary = { _, _ -> summaryOf(3) },
+            fetchSummary = { _, _, _ -> summaryOf(3) },
         )
 
         controller.load(course)
@@ -126,7 +126,7 @@ class AssessmentControllerTest {
         val controller = AssessmentController(
             clientProvider = { null },
             scope = this,
-            fetchSummary = { _, _ -> summaryOf(1) },
+            fetchSummary = { _, _, _ -> summaryOf(1) },
         )
 
         controller.load(course)

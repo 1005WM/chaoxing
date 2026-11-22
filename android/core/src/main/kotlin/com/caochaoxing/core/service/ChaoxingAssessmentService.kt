@@ -50,17 +50,19 @@ object ChaoxingAssessmentService {
         client: ChaoxingHttpClient,
         course: ChaoxingCourse,
         nowMs: Long = System.currentTimeMillis(),
+        onSample: ((ChaoxingAssessmentKind, String) -> Unit)? = null,
     ): ChaoxingAssessmentSummary =
-        fetchSummary(ChaoxingEndpoints.PRODUCTION, client, course, nowMs)
+        fetchSummary(ChaoxingEndpoints.PRODUCTION, client, course, nowMs, onSample)
 
     internal suspend fun fetchSummary(
         endpoints: ChaoxingEndpoints,
         client: ChaoxingHttpClient,
         course: ChaoxingCourse,
         nowMs: Long = System.currentTimeMillis(),
+        onSample: ((ChaoxingAssessmentKind, String) -> Unit)? = null,
     ): ChaoxingAssessmentSummary = coroutineScope {
-        val workDeferred = async { attempt { fetchWorkList(endpoints, client, course) } }
-        val examDeferred = async { attempt { fetchExamList(endpoints, client, course) } }
+        val workDeferred = async { attempt { fetchWorkList(endpoints, client, course, onSample) } }
+        val examDeferred = async { attempt { fetchExamList(endpoints, client, course, onSample) } }
         val work = workDeferred.await()
         val exam = examDeferred.await()
 
@@ -85,21 +87,24 @@ object ChaoxingAssessmentService {
         endpoints: ChaoxingEndpoints,
         client: ChaoxingHttpClient,
         course: ChaoxingCourse,
+        onSample: ((ChaoxingAssessmentKind, String) -> Unit)? = null,
     ): List<ChaoxingAssessmentItem> =
-        fetchKind(endpoints, client, course, ChaoxingAssessmentKind.WORK)
+        fetchKind(endpoints, client, course, ChaoxingAssessmentKind.WORK, onSample)
 
     internal suspend fun fetchExamList(
         endpoints: ChaoxingEndpoints,
         client: ChaoxingHttpClient,
         course: ChaoxingCourse,
+        onSample: ((ChaoxingAssessmentKind, String) -> Unit)? = null,
     ): List<ChaoxingAssessmentItem> =
-        fetchKind(endpoints, client, course, ChaoxingAssessmentKind.EXAM)
+        fetchKind(endpoints, client, course, ChaoxingAssessmentKind.EXAM, onSample)
 
     private suspend fun fetchKind(
         endpoints: ChaoxingEndpoints,
         client: ChaoxingHttpClient,
         course: ChaoxingCourse,
         kind: ChaoxingAssessmentKind,
+        onSample: ((ChaoxingAssessmentKind, String) -> Unit)? = null,
     ): List<ChaoxingAssessmentItem> {
         var lastError: ChaoxingError? = null
         for (base in endpoints.assessmentBases) {
@@ -117,6 +122,16 @@ object ChaoxingAssessmentService {
                 continue
             }
 
+            val html = response.bodyAsString()
+            onSample?.invoke(
+                kind,
+                buildString {
+                    appendLine("### ${kind.displayName}  HTTP ${response.statusCode}")
+                    appendLine(url)
+                    appendLine("--- 页面长度 ${html.length} ---")
+                    append(html.take(6_000))
+                },
+            )
             if (isLoginPage(response)) throw ChaoxingError.SessionExpired()
             if (!response.isSuccessful) {
                 lastError = ChaoxingError.NetworkError(
@@ -125,8 +140,6 @@ object ChaoxingAssessmentService {
                 )
                 continue
             }
-
-            val html = response.bodyAsString()
             if (isLoginPageHtml(html)) throw ChaoxingError.SessionExpired()
 
             val items = when (kind) {
@@ -174,9 +187,9 @@ object ChaoxingAssessmentService {
             if (title.isBlank()) return@mapNotNull null
 
             val date = cleanText(innerTag(inner, "p"))
-            val action = cleanText(innerTag(inner, "b"))
+            val action = workStatusText(inner)
             val deadline = ChaoxingAssessmentDeadline.extract(
-                raw = inner,
+                raw = "$attributes $inner",
                 nowMs = nowMs,
                 zone = zone,
                 allowSingleUnkeyed = false,
@@ -218,7 +231,7 @@ object ChaoxingAssessmentService {
             if (title.isBlank()) return@mapNotNull null
 
             val deadline = ChaoxingAssessmentDeadline.extract(
-                raw = inner,
+                raw = "$attributes $inner",
                 nowMs = nowMs,
                 zone = zone,
                 allowSingleUnkeyed = true,
@@ -242,6 +255,21 @@ object ChaoxingAssessmentService {
     /** 页面文案里出现这些词时，视为「确实没有条目」而不是解析失败。 */
     internal fun looksLikeEmptyListPage(html: String): Boolean =
         EMPTY_PAGE_MARKERS.any(html::contains)
+
+    /**
+     * 作业行的状态文案不一定在 `<b>` 里：有的版本用 `<i>` / `<em>` / `<span>`，
+     * 因此先找带状态关键词的元素，再退回 `<b>`。
+     */
+    internal fun workStatusText(inner: String): String {
+        val candidates = STATUS_TAGS.flatMap { tag ->
+            Regex("""<$tag\b[^>]*>(.*?)</$tag>""", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
+                .findAll(inner)
+                .map { cleanText(it.groupValues[1]) }
+                .filter { it.isNotBlank() }
+        }
+        return candidates.firstOrNull { text -> STATUS_KEYWORDS.any(text::contains) }
+            ?: cleanText(innerTag(inner, "b"))
+    }
 
     internal fun isLoginPageHtml(html: String): Boolean =
         html.length < 80_000 &&
@@ -318,6 +346,10 @@ object ChaoxingAssessmentService {
     private val LOGIN_TITLE_REGEX = Regex("""(?is)<title[^>]*>[^<]*登录""")
     private val PASSWORD_INPUT_REGEX = Regex("""(?is)<input[^>]+type\s*=\s*["']password["']""")
 
+    private val STATUS_TAGS = listOf("b", "i", "em", "span", "strong")
+    private val STATUS_KEYWORDS = listOf(
+        "未交", "已交", "提交", "批阅", "完成", "查看", "做作业", "过期", "缺考", "进行中", "开始",
+    )
     private val EMPTY_PAGE_MARKERS = listOf(
         "暂无作业", "暂无考试", "没有作业", "没有考试", "暂无数据", "暂时没有", "无数据",
     )
@@ -352,8 +384,8 @@ internal object ChaoxingAssessmentDeadline {
     )
     private val DATE_ONLY = Regex("""(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})\s*日?""")
     private val RANGE_TAIL = Regex("""^\s*[-~—–至到]\s*(\d{1,2})\s*[:：]\s*(\d{2})""")
-    private val DEADLINE_MARKERS = listOf("截止", "结束", "到期", "有效期", "最后")
-    private val PUBLISH_MARKERS = listOf("发布", "创建", "布置")
+    private val DEADLINE_MARKERS = listOf("截止", "结束", "到期", "有效期", "最后", "endtime", "deadline")
+    private val PUBLISH_MARKERS = listOf("发布", "创建", "布置", "starttime")
 
     private data class Candidate(
         val atMs: Long,

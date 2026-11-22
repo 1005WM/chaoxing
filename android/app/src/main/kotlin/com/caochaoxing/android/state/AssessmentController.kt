@@ -3,6 +3,7 @@
 
 package com.caochaoxing.android.state
 
+import com.caochaoxing.core.model.ChaoxingAssessmentKind
 import com.caochaoxing.core.model.ChaoxingAssessmentSummary
 import com.caochaoxing.core.model.ChaoxingCourse
 import com.caochaoxing.core.network.ChaoxingHttpClient
@@ -23,6 +24,8 @@ data class CourseAssessmentUiState(
     val isLoading: Boolean = false,
     val summary: ChaoxingAssessmentSummary? = null,
     val errorMessage: String? = null,
+    /** 最近一次请求的页面样本，仅在用户主动导出诊断时使用。 */
+    val sampleText: String? = null,
 ) {
     val isStale: Boolean
         get() = summary != null && errorMessage != null
@@ -37,8 +40,12 @@ data class CourseAssessmentUiState(
 class AssessmentController(
     private val clientProvider: () -> ChaoxingHttpClient?,
     private val scope: CoroutineScope,
-    private val fetchSummary: suspend (ChaoxingHttpClient, ChaoxingCourse) -> ChaoxingAssessmentSummary =
-        { client, course -> ChaoxingAssessmentService.fetchSummary(client, course) },
+    private val fetchSummary: suspend (
+        ChaoxingHttpClient,
+        ChaoxingCourse,
+        ((ChaoxingAssessmentKind, String) -> Unit)?,
+    ) -> ChaoxingAssessmentSummary =
+        { client, course, onSample -> ChaoxingAssessmentService.fetchSummary(client, course, onSample = onSample) },
 ) {
     constructor(appState: AndroidAppState, scope: CoroutineScope) : this(
         clientProvider = { appState.activeClient },
@@ -87,9 +94,15 @@ class AssessmentController(
         )
 
         job = scope.launch {
+            val samples = java.util.concurrent.ConcurrentHashMap<ChaoxingAssessmentKind, String>()
+            val onSample: (ChaoxingAssessmentKind, String) -> Unit = { kind, text -> samples[kind] = text }
             try {
-                val summary = fetchSummary(client, course)
-                _uiState.value = CourseAssessmentUiState(courseKey = key, summary = summary)
+                val summary = fetchSummary(client, course, onSample)
+                _uiState.value = CourseAssessmentUiState(
+                    courseKey = key,
+                    summary = summary,
+                    sampleText = joinSamples(samples),
+                )
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
@@ -97,9 +110,17 @@ class AssessmentController(
                     courseKey = key,
                     summary = previous,
                     errorMessage = e.message ?: "加载作业与考试失败",
+                    sampleText = joinSamples(samples),
                 )
             }
         }
+    }
+
+    private fun joinSamples(samples: Map<ChaoxingAssessmentKind, String>): String? {
+        if (samples.isEmpty()) return null
+        return samples.entries
+            .sortedBy { it.key.name }
+            .joinToString(separator = "\n\n") { it.value }
     }
 
     /** 退出登录 / 会话失效时显式清空。 */
