@@ -67,7 +67,7 @@ Caochaoxing 是一个面向 **macOS、iOS / iPadOS 和 Android** 的非官方学
   - 系统选图识别二维码（iOS 使用 `PhotosPicker`；Android 使用 `PickVisualMedia`，无需宽泛相册读取权限）与文本/链接粘贴解析（三端均支持）。
   - 拍照防重复处理（Android `AndroidImageObfuscator` 支持 EXIF 方向归一化、微裁切与缩放、稀疏像素扰动及 JPEG `COM` 注释块写入）。
 - **滑块验证**：三端统一使用本地像素边缘梯度匹配自动识别（纯代码计算，不使用 ONNX 推理），自动识别失败时回退手动滑块弹窗，并支持多账号并发验证排队。
-- **作业与考试（本 fork，仅 Android）**：课程详情新增「作业/考试」分栏，只读读取该课程全部作业与考试，展示服务端原文状态（未交 / 待批阅 / 已批阅 / 已过期等）、**精确到分的截止时间与剩余时间**，以及汇总统计（未完成、已完成、已过期、状态未知）。课程列表会显示每门课的未完成数量，并提供**按科目分组的待办清单**；点击作业条目会用当前会话在应用内 WebView 打开**电脑版网页**（可切手机版，只读展示，不自动提交）。不打开做题页、不提交、不修改服务端状态。数据源与解析边界见 [docs/ANDROID_ASSESSMENTS.md](docs/ANDROID_ASSESSMENTS.md)。
+- **作业与考试（本 fork，仅 Android）**：课程详情新增「作业/考试」分栏，只读读取该课程全部作业与考试，展示服务端原文状态（未交 / 待批阅 / 已批阅 / 已过期等）、**精确到分的截止时间与剩余时间**，以及汇总统计（未完成、已完成、已过期、状态未知）。课程列表会显示每门课的未完成数量，并提供**按科目分组的待办清单**；点击作业条目会用当前会话在应用内 WebView 打开**电脑版网页**（可切手机版，只读展示，不自动提交；学习通网页依赖的跳转桥做了最小兼容）。不打开做题页、不提交、不修改服务端状态。数据源与解析边界见 [docs/ANDROID_ASSESSMENTS.md](docs/ANDROID_ASSESSMENTS.md)。
 - **数据安全与备份**：
   - iOS 在应用沙盒内保存 `state.json`。按下方命令构建的 macOS 版将会话保存在当前用户的 `~/Library/Application Support/Caochaoxing/state.json`，文件权限为 `0600`。Android 使用 **Android Keystore AES-256-GCM** 加密存储 `filesDir/caochaoxing/state.enc`。
   - 本地保留最近 100 条签到历史。iOS 和 Android 支持导入、导出格式兼容的 JSON 备份，默认不含账号凭据。Android 使用系统文件选择器。

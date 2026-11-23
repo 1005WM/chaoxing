@@ -113,7 +113,10 @@ GET https://mooc1-api.chaoxing.com/phone/moocAnalysis/examList?courseId={courseI
 - 顶栏可一键切回**手机版**（原始链接）；考试保持原链接，避免误触开考；
 - 打开前把当前账号的 Cookie 注入 WebView（只写 `chaoxing.com` 域），保持登录态；
 - 只允许 `https://*.chaoxing.com`，防止会话被带到外部站点；
-- 不注入任何脚本、不调用提交接口；页面只是被展示，提交等按钮仍需自己点；
+- 页面靠学习通的 `jsBridge` 通知跳转（`CLIENT_OPEN_URL`），在官方 App 外会被丢弃，导致点了没反应。
+  这里补了一个**只做跳转**的兼容层：收到「打开网页 / 退出页面」通知时执行 `location.href` 或后退，
+  不碰答题、提交、签到等任何业务接口；
+- 打开页面后的按钮仍需自己点；
 - 关闭 WebView 时停止加载并销毁实例。
 
 **注意**：打开作业页这个 GET 请求本身可能在学习通侧生成「作答记录」（由服务端决定），

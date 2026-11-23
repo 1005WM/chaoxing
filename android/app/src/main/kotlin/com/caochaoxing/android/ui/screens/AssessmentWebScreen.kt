@@ -6,6 +6,7 @@
 package com.caochaoxing.android.ui.screens
 
 import android.annotation.SuppressLint
+import android.widget.Toast
 import android.graphics.Bitmap
 import android.os.Message
 import android.webkit.CookieManager
@@ -25,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.DesktopWindows
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Smartphone
@@ -51,10 +53,39 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.caochaoxing.android.state.AndroidAppState
+import com.caochaoxing.android.state.AssessmentPageExporter
 import com.caochaoxing.android.ui.theme.CxPalette
 import com.caochaoxing.android.ui.theme.CxTypography
 import com.caochaoxing.core.model.ChaoxingStoredCookie
 import java.net.URI
+
+/**
+ * 只实现跳转相关的桥接通知：打开网页、退出页面。
+ * 不涉及答题、提交、签到等任何业务接口。
+ */
+private const val BRIDGE_COMPAT_JS = """
+(function(){
+  try {
+    if (!window.jsBridge || window.__dshBridgeCompat) return;
+    window.__dshBridgeCompat = true;
+    var original = window.jsBridge.postNotification;
+    window.jsBridge.postNotification = function(name, info){
+      try {
+        info = info || {};
+        if (name === 'CLIENT_OPEN_URL' && info.webUrl) {
+          window.location.href = info.webUrl;
+          return;
+        }
+        if (name === 'CLIENT_EXIT_LEVEL' || name === 'CLIENT_EXIT_WEBAPP') {
+          window.history.back();
+          return;
+        }
+      } catch (e) {}
+      try { if (original) original.call(this, name, info); } catch (e) {}
+    };
+  } catch (e) {}
+})();
+"""
 
 private const val DESKTOP_USER_AGENT =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
@@ -86,6 +117,7 @@ fun AssessmentWebScreen(
     var currentUrl by remember(url) { mutableStateOf(url) }
 
     val popupViews = remember { mutableListOf<WebView>() }
+    val consoleMessages = remember { mutableListOf<String>() }
     val webView = remember {
         WebView(context).apply {
             settings.apply {
@@ -100,6 +132,15 @@ fun AssessmentWebScreen(
             }
             val main = this
             webChromeClient = object : WebChromeClient() {
+                override fun onConsoleMessage(message: android.webkit.ConsoleMessage?): Boolean {
+                    if (message != null) {
+                        if (consoleMessages.size > 60) consoleMessages.removeAt(0)
+                        consoleMessages += "[${message.messageLevel()}] ${message.message()} " +
+                            "(${message.sourceId()}:${message.lineNumber()})"
+                    }
+                    return true
+                }
+
                 // 学习通电脑版列表用 window.open 打开作业页，这里把新窗口的地址接回主 WebView。
                 override fun onCreateWindow(
                     view: WebView,
@@ -141,6 +182,9 @@ fun AssessmentWebScreen(
                     isLoading = false
                     canGoBack = view?.canGoBack() == true
                     if (!url.isNullOrBlank()) currentUrl = url
+                    // 学习通 H5 / 电脑版页面靠 jsBridge 的 CLIENT_OPEN_URL 跳转；官方 App 之外
+                    // 这个调用会被丢弃，点条目没反应。这里只补一个「收到打开请求就跳转」的兼容层。
+                    view?.evaluateJavascript(BRIDGE_COMPAT_JS, null)
                 }
 
                 override fun onReceivedError(
@@ -249,6 +293,30 @@ fun AssessmentWebScreen(
                                 tint = CxPalette.accent,
                             )
                         }
+                    }
+                    IconButton(
+                        onClick = {
+                            val extra = buildString {
+                                appendLine("URL: ${webView.url ?: currentUrl}")
+                                appendLine("UA: ${webView.settings.userAgentString}")
+                                appendLine("--- console ---")
+                                consoleMessages.forEach { appendLine(it) }
+                            }
+                            AssessmentPageExporter.export(context, webView, extra) { saved ->
+                                Toast.makeText(
+                                    context,
+                                    saved?.let { "网页源码已保存到 $it" } ?: "保存失败",
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            }
+                        },
+                        enabled = !blocked,
+                    ) {
+                        Icon(
+                            Icons.Rounded.BugReport,
+                            contentDescription = "保存网页源码（排查用）",
+                            tint = CxPalette.inkTertiary,
+                        )
                     }
                     IconButton(onClick = { if (!blocked) webView.reload() }, enabled = !blocked) {
                         Icon(Icons.Rounded.Refresh, contentDescription = "刷新", tint = CxPalette.accent)

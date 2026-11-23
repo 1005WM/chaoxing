@@ -446,6 +446,7 @@ object ChaoxingAssessmentService {
     )
     private val EMPTY_PAGE_MARKERS = listOf(
         "暂无作业", "暂无考试", "没有作业", "没有考试", "暂无数据", "暂时没有", "无数据",
+        "暂未收到", "未收到考试", "暂未发布",
     )
 }
 
