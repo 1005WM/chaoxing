@@ -7,9 +7,11 @@ package com.caochaoxing.android.ui.screens
 
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
+import android.os.Message
 import android.webkit.CookieManager
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -83,6 +85,7 @@ fun AssessmentWebScreen(
     var canGoBack by remember { mutableStateOf(false) }
     var currentUrl by remember(url) { mutableStateOf(url) }
 
+    val popupViews = remember { mutableListOf<WebView>() }
     val webView = remember {
         WebView(context).apply {
             settings.apply {
@@ -91,8 +94,41 @@ fun AssessmentWebScreen(
                 allowFileAccess = false
                 allowContentAccess = false
                 mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                setSupportMultipleWindows(false)
-                javaScriptCanOpenWindowsAutomatically = false
+                // 学习通列表里的条目常用 window.open 打开作业页；关闭多窗口会导致点了没反应。
+                setSupportMultipleWindows(true)
+                javaScriptCanOpenWindowsAutomatically = true
+            }
+            val main = this
+            webChromeClient = object : WebChromeClient() {
+                // 学习通电脑版列表用 window.open 打开作业页，这里把新窗口的地址接回主 WebView。
+                override fun onCreateWindow(
+                    view: WebView,
+                    isDialog: Boolean,
+                    isUserGesture: Boolean,
+                    resultMsg: Message,
+                ): Boolean {
+                    val transport = resultMsg.obj as? WebView.WebViewTransport ?: return false
+                    val child = WebView(main.context).apply {
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        webViewClient = object : WebViewClient() {
+                            override fun shouldOverrideUrlLoading(
+                                view: WebView,
+                                request: WebResourceRequest,
+                            ): Boolean {
+                                val target = request.url?.toString().orEmpty()
+                                if (target.isNotBlank()) {
+                                    main.loadUrl(target)
+                                }
+                                return true
+                            }
+                        }
+                    }
+                    popupViews += child
+                    transport.webView = child
+                    resultMsg.sendToTarget()
+                    return true
+                }
             }
             webViewClient = object : WebViewClient() {
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
@@ -136,6 +172,11 @@ fun AssessmentWebScreen(
 
     DisposableEffect(webView) {
         onDispose {
+            popupViews.forEach { popup ->
+                popup.stopLoading()
+                popup.destroy()
+            }
+            popupViews.clear()
             webView.stopLoading()
             webView.destroy()
         }
