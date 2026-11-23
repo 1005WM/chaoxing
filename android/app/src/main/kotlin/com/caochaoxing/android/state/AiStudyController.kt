@@ -26,18 +26,67 @@ data class AiDraft(val title: String, val questions: List<AiQuestion> = emptyLis
 internal const val EXTRACT_AI_QUESTIONS = """
 (function(){
  var result=[];
+ var excluded='script,style,noscript,textarea,button,input,iframe,[hidden],[aria-hidden="true"],.mark_answer,.answer-analysis,.analysis,.correctAnswer,.teacherComment,[contenteditable="true"]';
+ function questionText(node,doc){
+   var copy=node.cloneNode(true);
+   var originals=Array.from(node.querySelectorAll('*')), clones=Array.from(copy.querySelectorAll('*'));
+   originals.forEach(function(e,index){
+     var style=doc.defaultView.getComputedStyle(e);
+     if(style.display==='none' || style.visibility==='hidden') clones[index].remove();
+   });
+   Array.from(copy.querySelectorAll(excluded)).forEach(function(e){e.remove();});
+   Array.from(copy.querySelectorAll('br')).forEach(function(e){e.replaceWith(doc.createTextNode('\n'));});
+   Array.from(copy.querySelectorAll('p,div,h1,h2,h3,h4,li,tr')).forEach(function(e){e.appendChild(doc.createTextNode('\n'));});
+   return (copy.textContent || '').replace(/[ \t]+/g,' ').replace(/\n\s*\n/g,'\n').trim();
+ }
+ function picture(element, doc){
+   if(element.tagName.toLowerCase()==='canvas') {
+     try { return element.toDataURL('image/png'); } catch(e) { return ''; }
+   }
+   var lazy=element.getAttribute('data-original') || element.getAttribute('data-src');
+   var raw=lazy || element.currentSrc || element.getAttribute('src') || '';
+   var source=''; try { source=new URL(raw,doc.baseURI).href; } catch(e) {}
+   if(element.complete && element.naturalWidth>0 && (!lazy || source===element.currentSrc)) {
+     try {
+       var scale=Math.min(1,2048/Math.max(element.naturalWidth,element.naturalHeight));
+       var canvas=doc.createElement('canvas');
+       canvas.width=Math.max(1,Math.round(element.naturalWidth*scale));
+       canvas.height=Math.max(1,Math.round(element.naturalHeight*scale));
+       var context=canvas.getContext('2d'); context.fillStyle='white'; context.fillRect(0,0,canvas.width,canvas.height);
+       context.drawImage(element,0,0,canvas.width,canvas.height);
+       return canvas.toDataURL('image/jpeg',0.92);
+     } catch(e) {}
+   }
+   return source;
+ }
  function scan(doc){
    var nodes=Array.from(doc.querySelectorAll('.TiMu, .questionLi, .question-item, .questionItem'));
    nodes.forEach(function(node){
      if(node.parentElement && node.parentElement.closest('.TiMu, .questionLi, .question-item, .questionItem')) return;
-     var title=node.querySelector('.Zy_TItle, .mark_name, .question-title, .questionTitle, h3');
-     if(!title) return;
-     var text=title.innerText.trim(); if(!text) return;
+     var title=node.querySelector('.Zy_TItle, .mark_name, .question-title, .questionTitle, h3') || node;
+     var text=questionText(node,doc);
      var choices=Array.from(node.querySelectorAll('.Zy_ulTop li, .answerList li, .question-options li, .answerBg li'));
      if(!choices.length) choices=Array.from(node.querySelectorAll('label'));
-     var options=choices.map(function(e){return e.innerText.trim().replace(/^[A-Z][.、．\s]+/, '');}).filter(Boolean);
-     var type=/多选/.test(text)?'多选':/单选/.test(text)?'单选':/判断/.test(text)?'判断':'文字题';
-     result.push({id:String(result.length),type:type,text:text.slice(0,8000),options:options.slice(0,26),hasImage:!!title.querySelector('img,svg,canvas') || choices.some(function(e){return !!e.querySelector('img,svg,canvas');})});
+     choices=choices.filter(function(e){return e.innerText.trim() || e.querySelector('img,svg,canvas');});
+     var options=choices.map(function(e){return e.innerText.trim().replace(/^[A-Z][.、．\s]+/, '') || '图片选项';});
+     var images=[];
+     var stemImages=Array.from(node.querySelectorAll('img,canvas')).filter(function(e){
+       return !choices.some(function(choice){return choice.contains(e);}) && !e.closest(excluded);
+     });
+     stemImages.forEach(function(e,index){images.push({label:'题干图片 '+(index+1),source:picture(e,doc)});});
+     choices.forEach(function(choice,index){Array.from(choice.querySelectorAll('img,canvas')).forEach(function(e,n){
+       images.push({label:'选项 '+String.fromCharCode(65+index)+' 图片 '+(n+1),source:picture(e,doc)});
+     });});
+     var hasImage=images.length>0 || !!title.querySelector('svg') || choices.some(function(e){return !!e.querySelector('svg');});
+     if(!text && !hasImage) return;
+     if(!text) text='图片题';
+     var typeNode=node.querySelector('input[name^="type"],input[id^="type"],.question-type,.type_tit,.mark_type');
+     var typeValue=typeNode && typeNode.value;
+     var typeText=(typeNode && typeNode.innerText || '')+' '+title.innerText;
+     var type=typeValue==='3' || /判断/.test(typeText)?'判断':typeValue==='1' || /多选/.test(typeText)?'多选':typeValue==='0' || /单选/.test(typeText)?'单选':'文字题';
+     if(type==='文字题' && /判断题/.test(text)) type='判断';
+     if(type==='判断' && !options.length) options=['正确','错误'];
+     result.push({id:String(result.length),type:type,text:text,options:options,hasImage:hasImage,images:images.slice(0,7)});
    });
    Array.from(doc.querySelectorAll('iframe')).forEach(function(frame){try{if(frame.contentDocument)scan(frame.contentDocument);}catch(e){}});
  }
@@ -53,6 +102,7 @@ class AiStudyController(private val context: Context, private val appState: Andr
     private val _drafts = MutableStateFlow<Map<String, AiDraft>>(emptyMap())
     val drafts = _drafts.asStateFlow()
     val api = AiAnswerService()
+    private val imageReader = AiQuestionImageReader()
     private val jobs = mutableMapOf<String, Job>()
     private val automatic = mutableSetOf<String>()
     private val mutex = Mutex()
@@ -105,7 +155,9 @@ class AiStudyController(private val context: Context, private val appState: Andr
 
     fun decodeQuestions(raw: String): List<AiQuestion> {
         val encoded = json.decodeFromString<String>(raw)
-        return json.decodeFromString<List<AiQuestion>>(encoded).filter { it.text.isNotBlank() }.take(100)
+        val questions = json.decodeFromString<List<AiQuestion>>(encoded).filter { it.text.isNotBlank() }.take(100)
+        require(questions.all { it.text.length <= 32_000 && it.options.size <= 26 }) { "题目内容过长，请分题读取" }
+        return questions
     }
 
     fun generate(id: String, title: String, questions: List<AiQuestion>? = null, automaticRequest: Boolean = false, retryId: String? = null) {
@@ -131,7 +183,11 @@ class AiStudyController(private val context: Context, private val appState: Andr
                         if (retryId != null && question.id != retryId) continue
                         if (retryId == null && question.id in draft.answers) continue
                         try {
-                            val answer = api.answer(config.url, config.key, config.model, question)
+                            if (question.images.isNotEmpty()) {
+                                _drafts.value = _drafts.value + (id to draft.copy(message = "正在读取题图"))
+                            }
+                            val prepared = imageReader.prepare(question)
+                            val answer = api.answer(config.url, config.key, config.model, prepared)
                             ensureActive()
                             draft = draft.copy(answers = draft.answers + (question.id to answer), errors = draft.errors - question.id)
                         } catch (e: CancellationException) { throw e }

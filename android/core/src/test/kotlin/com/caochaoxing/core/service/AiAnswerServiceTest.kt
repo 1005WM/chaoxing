@@ -7,8 +7,52 @@ import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
+import kotlinx.serialization.json.*
 
 class AiAnswerServiceTest {
+    @Test
+    fun mapsJudgmentWordsToTheActualOptionOrder() = runBlocking {
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body("""{"choices":[{"message":{"content":"{\"answer\":\"正确\",\"explanation\":\"完整陈述成立\"}"}}]}""".toResponseBody()).build()
+        }.build()
+        val answer = AiAnswerService(http).answer("https://model.example/v1", "test", "vision",
+            AiQuestion("1", "判断", "下列陈述是否成立", listOf("错误", "正确")))
+        assertEquals("B", answer.answer)
+    }
+
+    @Test
+    fun sendsImagesAsMultimodalContentWithOptionLabels() = runBlocking {
+        val image = "data:image/png;base64,aGVsbG8="
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            val buffer = okio.Buffer()
+            chain.request().body!!.writeTo(buffer)
+            val payload = Json.parseToJsonElement(buffer.readUtf8()).jsonObject
+            assertEquals("vision-model", payload["model"]!!.jsonPrimitive.content)
+            val parts = payload["messages"]!!.jsonArray[1].jsonObject["content"]!!.jsonArray
+            assertEquals("text", parts[0].jsonObject["type"]!!.jsonPrimitive.content)
+            assertFalse(parts[0].jsonObject["text"]!!.jsonPrimitive.content.contains(image))
+            assertEquals("题干图片 1", parts[1].jsonObject["text"]!!.jsonPrimitive.content)
+            assertEquals("image_url", parts[2].jsonObject["type"]!!.jsonPrimitive.content)
+            assertEquals(image, parts[2].jsonObject["image_url"]!!.jsonObject["url"]!!.jsonPrimitive.content)
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body("""{"choices":[{"message":{"content":"{\"answer\":\"B\",\"explanation\":\"根据题图\"}"}}]}""".toResponseBody()).build()
+        }.build()
+        val answer = AiAnswerService(http).answer("https://model.example/v1", "test", "vision-model",
+            AiQuestion("1", "单选", "看图选择", listOf("A 图", "B 图"), true, listOf(AiQuestionImage("题干图片 1", image))))
+        assertEquals("B", answer.answer)
+    }
+
+    @Test
+    fun missingImageAndUnresolvedPrivateUrlsFailBeforeModelRequest() = runBlocking {
+        val http = OkHttpClient.Builder().addInterceptor { error("No request should be made") }.build()
+        val service = AiAnswerService(http)
+        val missing = runCatching { service.answer("https://model.example/v1", "key", "vision", AiQuestion("1", "文字题", "图片题", hasImage = true)) }
+        assertTrue(missing.isFailure)
+        val remote = runCatching { service.answer("https://model.example/v1", "key", "vision", AiQuestion("1", "文字题", "图片题", images = listOf(AiQuestionImage("题图", "https://private.chaoxing.com/image")))) }
+        assertTrue(remote.isFailure)
+    }
+
     @Test
     fun readsModelsAndKeepsAuthorizationOnConfiguredHost() = runBlocking {
         val http = OkHttpClient.Builder().addInterceptor { chain ->

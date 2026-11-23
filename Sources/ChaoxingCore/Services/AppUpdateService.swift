@@ -46,7 +46,7 @@ public enum AppUpdateSource {
     public static let repository = "1005WM/chaoxing"
     public static let mirrorLatestURL = ""
     public static let includePrerelease = false
-    public static let currentVersion = "1.6.0"
+    public static let currentVersion = "1.6.1"
     public static let iosStoreURL = ""
 }
 

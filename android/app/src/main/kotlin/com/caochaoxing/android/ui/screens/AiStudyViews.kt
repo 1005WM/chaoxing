@@ -66,7 +66,7 @@ internal fun AiSettingsCard() {
                 }
                 if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
                 if (message.isNotBlank()) Text(message, style = MaterialTheme.typography.bodySmall)
-                Text("题干和选项将发送到所填 AI 服务，Key 加密保存在本机。", style = MaterialTheme.typography.bodySmall)
+                Text("题干、选项和题图将发送到所填 AI 服务，Key 加密保存在本机。", style = MaterialTheme.typography.bodySmall)
                 Button(onClick = {
                     try {
                         controller.save(config.copy(url = url.trim(), key = key.trim(), model = model.trim()))
@@ -99,6 +99,7 @@ internal fun AiDraftSheet(id: String, title: String, questions: List<AiQuestion>
                 it.questions.forEach { question ->
                     HorizontalDivider()
                     Text(question.text, style = MaterialTheme.typography.titleMedium)
+                    if (question.images.isNotEmpty()) Text("本题包含 ${question.images.size} 张题图", style = MaterialTheme.typography.bodySmall)
                     question.options.forEachIndexed { index, option -> Text("${'A' + index}  $option") }
                     it.answers[question.id]?.let { answer ->
                         var edited by remember(id, question.id, answer) { mutableStateOf(answer.answer) }

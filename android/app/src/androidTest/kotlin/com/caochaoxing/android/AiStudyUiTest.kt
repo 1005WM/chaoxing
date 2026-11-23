@@ -14,6 +14,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.caochaoxing.android.state.AiConfig
 import com.caochaoxing.android.state.AiStudyController
 import com.caochaoxing.android.state.EXTRACT_AI_QUESTIONS
+import com.caochaoxing.android.state.AiQuestionImageReader
 import com.caochaoxing.android.ui.screens.*
 import com.caochaoxing.android.ui.theme.CaochaoxingTheme
 import com.caochaoxing.core.service.*
@@ -28,6 +29,105 @@ import java.io.File
 
 @RunWith(AndroidJUnit4::class)
 class AiStudyUiTest {
+    @Test
+    fun retainsWholeJudgmentStatementInstructionsAndStemImage() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val app = instrumentation.targetContext.applicationContext as CaochaoxingApp
+        val image = "data:image/png;base64," + testImage()
+        val result = java.util.concurrent.ArrayBlockingQueue<String>(1)
+        var web: android.webkit.WebView? = null
+        instrumentation.runOnMainSync {
+            web = android.webkit.WebView(app).apply {
+                settings.javaScriptEnabled = true
+                webViewClient = object : android.webkit.WebViewClient() {
+                    override fun onPageFinished(view: android.webkit.WebView, url: String) {
+                        view.evaluateJavascript(EXTRACT_AI_QUESTIONS) { result.offer(it) }
+                    }
+                }
+                loadDataWithBaseURL("https://fixture.chaoxing.com/", """<div class="TiMu"><h3>判断题</h3><p>请结合下图判断，单位为厘米。</p><div class="stem">图中两个三角形不一定全等。</div><p><img src="$image"></p><label><input type="radio">错误</label><label><input type="radio">正确</label><input name="type1" value="3" type="hidden"><input type="hidden" value="credential"><div class="analysis">参考答案不要提取</div><div style="display:none">隐藏答案</div></div><div class="TiMu"><input name="type2" type="hidden" value="3"><p>队列遵循先进先出的原则。</p></div>""", "text/html", "UTF-8", null)
+            }
+        }
+        try {
+            val questions = app.aiStudyController.decodeQuestions(checkNotNull(result.poll(10, java.util.concurrent.TimeUnit.SECONDS)))
+            val first = questions.first()
+            assertEquals("判断", first.type)
+            assertTrue(first.text.contains("请结合下图判断，单位为厘米"))
+            assertTrue(first.text.contains("不一定全等"))
+            assertEquals(listOf("错误", "正确"), first.options)
+            assertEquals(1, first.images.size)
+            assertFalse(first.text.contains("参考答案"))
+            assertFalse(first.text.contains("credential"))
+            assertFalse(first.text.contains("隐藏答案"))
+            assertEquals("判断", questions[1].type)
+            assertEquals(listOf("正确", "错误"), questions[1].options)
+            assertTrue(questions[1].text.contains("先进先出"))
+        } finally { instrumentation.runOnMainSync { web?.destroy() } }
+    }
+
+    private fun testImage(): String {
+        val bitmap = Bitmap.createBitmap(320, 120, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        canvas.drawColor(android.graphics.Color.WHITE)
+        canvas.drawText("2 + 2 = ?", 20f, 70f, android.graphics.Paint().apply { color = android.graphics.Color.BLACK; textSize = 36f })
+        val stream = java.io.ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+        bitmap.recycle()
+        return android.util.Base64.encodeToString(stream.toByteArray(), android.util.Base64.NO_WRAP)
+    }
+
+    @Test
+    fun extractsImageOnlyStemAndRetainsImageOptionOrder() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val app = instrumentation.targetContext.applicationContext as CaochaoxingApp
+        val image = "data:image/png;base64," + testImage()
+        val result = java.util.concurrent.ArrayBlockingQueue<String>(1)
+        var web: android.webkit.WebView? = null
+        instrumentation.runOnMainSync {
+            web = android.webkit.WebView(app).apply {
+                settings.javaScriptEnabled = true
+                webViewClient = object : android.webkit.WebViewClient() {
+                    override fun onPageFinished(view: android.webkit.WebView, url: String) {
+                        view.evaluateJavascript(EXTRACT_AI_QUESTIONS) { result.offer(it) }
+                    }
+                }
+                loadDataWithBaseURL("https://fixture.chaoxing.com/", """<div class="TiMu"><h3 class="Zy_TItle"><img src="$image"></h3><ul class="Zy_ulTop"><li>A.<img src="$image"></li><li>B.<img src="$image"></li></ul></div>""", "text/html", "UTF-8", null)
+            }
+        }
+        try {
+            val questions = app.aiStudyController.decodeQuestions(checkNotNull(result.poll(10, java.util.concurrent.TimeUnit.SECONDS)))
+            val question = questions.single()
+            assertTrue(question.text.contains("A."))
+            assertEquals(2, question.options.size)
+            assertEquals(listOf("题干图片 1", "选项 A 图片 1", "选项 B 图片 1"), question.images.map { it.label })
+            val prepared = runBlocking { AiQuestionImageReader().prepare(question) }
+            assertTrue(prepared.images.all { it.source.startsWith("data:image/jpeg;base64,") })
+        } finally { instrumentation.runOnMainSync { web?.destroy() } }
+    }
+
+    @Test
+    fun downloadsPrivateImageWithoutLeakingSessionOnRedirect() = runBlocking {
+        val bytes = android.util.Base64.decode(testImage(), android.util.Base64.NO_WRAP)
+        var requests = 0
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            requests++
+            assertNull(chain.request().header("Authorization"))
+            val builder = Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
+            if (chain.request().url.host == "image.chaoxing.com") {
+                assertEquals("session=fixture", chain.request().header("Cookie"))
+                builder.code(302).message("Redirect").header("Location", "https://cdn.example/image.png").body("".toResponseBody()).build()
+            } else {
+                assertNull(chain.request().header("Cookie"))
+                assertNull(chain.request().header("Referer"))
+                builder.code(200).message("OK").body(bytes.toResponseBody()).build()
+            }
+        }.build()
+        val reader = AiQuestionImageReader(http) { "session=fixture" }
+        val question = AiQuestion("1", "文字题", "看图", hasImage = true, images = listOf(AiQuestionImage("题干图", "https://image.chaoxing.com/private.png")))
+        val prepared = reader.prepare(question)
+        assertEquals(2, requests)
+        assertTrue(prepared.images.single().source.startsWith("data:image/jpeg;base64,"))
+    }
+
     @Test
     fun extractsRenderedQuestionsWithoutHiddenCredentials() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
