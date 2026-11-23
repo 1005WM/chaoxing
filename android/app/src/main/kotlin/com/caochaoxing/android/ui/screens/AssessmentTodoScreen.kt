@@ -70,6 +70,7 @@ fun AssessmentTodoScreen(
     appState: AndroidAppState,
     onBack: () -> Unit,
     onCourseClick: (ChaoxingCourse) -> Unit,
+    onOpenWeb: (ChaoxingAssessmentItem) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -137,6 +138,7 @@ fun AssessmentTodoScreen(
                         .firstOrNull { it.courseId == item.courseId && it.classId == item.classId }
                         ?.let(onCourseClick)
                 },
+                onOpenWeb = onOpenWeb,
             )
         }
     }
@@ -146,6 +148,7 @@ fun AssessmentTodoScreen(
 private fun TodoListContent(
     state: AssessmentOverviewState,
     onCourseClick: (ChaoxingAssessmentItem) -> Unit,
+    onOpenWeb: (ChaoxingAssessmentItem) -> Unit,
 ) {
     val pending = state.pendingItems
     val grouped = remember(pending) {
@@ -225,7 +228,12 @@ private fun TodoListContent(
                 ),
                 key = { "${it.kind.name}_${it.title}_${it.courseId}_${it.classId}" },
             ) { item ->
-                TodoRow(item = item, onClick = { onCourseClick(item) })
+                TodoRow(
+                    item = item,
+                    onClick = {
+                        if (!item.taskUrl.isNullOrBlank()) onOpenWeb(item) else onCourseClick(item)
+                    },
+                )
             }
         }
 
@@ -286,7 +294,7 @@ private fun TodoRow(item: ChaoxingAssessmentItem, onClick: () -> Unit) {
                     else -> "页面未提供时间"
                 }
                 Text(
-                    text = deadlineText,
+                    text = if (!item.taskUrl.isNullOrBlank()) "$deadlineText · 点击查看网页" else deadlineText,
                     style = CxTypography.mono(11.sp),
                     color = if (item.isOverdueAt(now)) CxPalette.cinnabar else CxPalette.inkSecondary,
                     maxLines = 1,

@@ -90,6 +90,7 @@ import com.caochaoxing.android.ui.components.CxIconTile
 import com.caochaoxing.android.ui.components.CxPrimaryButton
 import com.caochaoxing.android.ui.components.CxTone
 import com.caochaoxing.android.ui.screens.AssessmentTodoScreen
+import com.caochaoxing.android.ui.screens.AssessmentWebScreen
 import com.caochaoxing.android.ui.screens.COURSE_SUBTAB_ASSESSMENT
 import com.caochaoxing.android.ui.screens.COURSE_SUBTAB_SIGN
 import com.caochaoxing.android.ui.screens.CourseDetailScreen
@@ -155,6 +156,7 @@ private object CxRoutes {
     const val MAIN = "main"
     const val COURSE_DETAIL = "course_detail/{courseKey}?tab={tab}"
     const val ASSESSMENT_TODO = "assessment_todo"
+    const val ASSESSMENT_WEB = "assessment_web?url={url}&title={title}"
     const val GROUP_DETAIL = "group_detail/{encodedGroupId}"
     const val OTHER_USERS = "other_users"
     const val LOCATION_PRESETS = "location_presets"
@@ -169,6 +171,9 @@ private object CxRoutes {
             append(tab)
         }
     }
+
+    fun assessmentWeb(url: String, title: String): String =
+        "assessment_web?url=${Uri.encode(url)}&title=${Uri.encode(title)}"
 
     fun groupDetail(groupId: String): String {
         val encoded = Base64.getUrlEncoder()
@@ -590,6 +595,11 @@ private fun AuthenticatedMainContainer(
                 onActivityClick = ::openSignActivity,
                 courseStudyController = courseStudyController,
                 initialSubTab = initialTab,
+                onOpenAssessmentPage = { item ->
+                    item.taskUrl?.takeIf { it.isNotBlank() }?.let { taskUrl ->
+                        navController.navigate(CxRoutes.assessmentWeb(taskUrl, item.title))
+                    }
+                },
             )
         }
 
@@ -600,6 +610,29 @@ private fun AuthenticatedMainContainer(
                 onCourseClick = { course ->
                     navController.navigate(CxRoutes.courseDetail(course.id, tab = COURSE_SUBTAB_ASSESSMENT))
                 },
+                onOpenWeb = { item ->
+                    item.taskUrl?.takeIf { it.isNotBlank() }?.let { taskUrl ->
+                        navController.navigate(CxRoutes.assessmentWeb(taskUrl, item.title))
+                    }
+                },
+            )
+        }
+
+        composable(
+            route = CxRoutes.ASSESSMENT_WEB,
+            arguments = listOf(
+                navArgument("url") { type = NavType.StringType },
+                navArgument("title") {
+                    type = NavType.StringType
+                    defaultValue = ""
+                },
+            ),
+        ) { backStackEntry ->
+            AssessmentWebScreen(
+                appState = appState,
+                url = backStackEntry.arguments?.getString("url").orEmpty(),
+                title = backStackEntry.arguments?.getString("title").orEmpty(),
+                onBack = { navController.popBackStack() },
             )
         }
 

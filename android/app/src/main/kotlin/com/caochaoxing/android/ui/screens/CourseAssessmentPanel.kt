@@ -5,6 +5,7 @@ package com.caochaoxing.android.ui.screens
 
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -62,6 +63,7 @@ fun LazyListScope.courseAssessmentItems(
     course: ChaoxingCourse,
     state: CourseAssessmentUiState,
     onRetry: () -> Unit,
+    onOpenItem: (ChaoxingAssessmentItem) -> Unit = {},
 ) {
     val summary = state.summary
 
@@ -141,7 +143,7 @@ fun LazyListScope.courseAssessmentItems(
         itemsIndexed(
             items = sortAssessments(summary.works),
             key = { index, item -> "work_${index}_${item.title}" },
-        ) { _, item -> AssessmentRow(item = item) }
+        ) { _, item -> AssessmentRow(item = item, onOpen = { onOpenItem(item) }) }
     }
 
     item(key = "assessment_exam_header") {
@@ -162,7 +164,7 @@ fun LazyListScope.courseAssessmentItems(
         itemsIndexed(
             items = sortAssessments(summary.exams),
             key = { index, item -> "exam_${index}_${item.title}" },
-        ) { _, item -> AssessmentRow(item = item) }
+        ) { _, item -> AssessmentRow(item = item, onOpen = { onOpenItem(item) }) }
     }
 }
 
@@ -232,7 +234,7 @@ private fun AssessmentOverviewCard(state: CourseAssessmentUiState) {
 }
 
 @Composable
-private fun AssessmentRow(item: ChaoxingAssessmentItem) {
+private fun AssessmentRow(item: ChaoxingAssessmentItem, onOpen: () -> Unit) {
     val tone = when {
         item.status.isCompleted -> CxTone.SAGE
         item.status.isPending -> CxTone.AMBER
@@ -240,7 +242,12 @@ private fun AssessmentRow(item: ChaoxingAssessmentItem) {
         else -> CxTone.NEUTRAL
     }
 
-    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = !item.taskUrl.isNullOrBlank(), onClick = onOpen)
+            .padding(vertical = 2.dp),
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -264,6 +271,13 @@ private fun AssessmentRow(item: ChaoxingAssessmentItem) {
                     overflow = TextOverflow.Ellipsis,
                 )
                 DeadlineLine(item)
+                if (!item.taskUrl.isNullOrBlank()) {
+                    Text(
+                        text = "点击查看网页",
+                        style = CxTypography.mono(10.5.sp),
+                        color = CxPalette.inkTertiary,
+                    )
+                }
                 val detailText = when {
                     item.kind == ChaoxingAssessmentKind.EXAM &&
                         item.detail.isNotBlank() && item.detail != "--" -> "分数 ${item.detail}"

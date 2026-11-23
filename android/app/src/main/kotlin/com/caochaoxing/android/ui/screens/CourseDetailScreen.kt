@@ -66,6 +66,7 @@ import com.caochaoxing.android.ui.components.CxSectionHeader
 import com.caochaoxing.android.ui.components.CxTone
 import com.caochaoxing.android.ui.theme.CxPalette
 import com.caochaoxing.android.ui.theme.CxTypography
+import com.caochaoxing.core.model.ChaoxingAssessmentItem
 import com.caochaoxing.core.model.ChaoxingSignActivity
 import kotlinx.coroutines.launch
 
@@ -85,6 +86,7 @@ fun CourseDetailScreen(
     modifier: Modifier = Modifier,
     courseStudyController: CourseStudyController? = null,
     initialSubTab: Int = COURSE_SUBTAB_SIGN,
+    onOpenAssessmentPage: (ChaoxingAssessmentItem) -> Unit = {},
 ) {
     val uiState by appState.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -383,6 +385,7 @@ fun CourseDetailScreen(
                         course = course,
                         state = assessmentState,
                         onRetry = { resolvedAssessmentController.load(course, forceRefresh = true) },
+                        onOpenItem = onOpenAssessmentPage,
                     )
                 } else {
                     item(key = "activities_header") {
