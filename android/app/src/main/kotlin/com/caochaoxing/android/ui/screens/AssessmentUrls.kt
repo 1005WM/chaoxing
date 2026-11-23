@@ -5,8 +5,8 @@ package com.caochaoxing.android.ui.screens
 
 import com.caochaoxing.core.model.ChaoxingAssessmentItem
 import com.caochaoxing.core.model.ChaoxingAssessmentKind
-import java.net.URI
 import java.net.URLDecoder
+import java.net.URLEncoder
 
 /**
  * 把手机列表页里的作业链接换成学习通电脑版作业页。
@@ -18,22 +18,30 @@ import java.net.URLDecoder
  */
 internal fun desktopAssessmentUrl(item: ChaoxingAssessmentItem): String? {
     if (item.kind != ChaoxingAssessmentKind.WORK) return null
-    val raw = item.taskUrl?.takeIf { it.isNotBlank() } ?: return null
-    val uri = runCatching { URI(raw) }.getOrNull() ?: return null
-    val query = parseQuery(uri.rawQuery)
-    val workId = query["workId"] ?: query["id"] ?: return null
-    val courseId = query["courseId"] ?: item.courseId.takeIf { it > 0 }?.toString() ?: return null
-    val classId = query["classId"] ?: item.classId.takeIf { it > 0 }?.toString() ?: return null
+    val raw = item.taskUrl?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    if (!raw.startsWith("http://", ignoreCase = true) &&
+        !raw.startsWith("https://", ignoreCase = true)
+    ) {
+        return null
+    }
+    // 直接按字符串取查询串，避免 java.net.URI 因为中文标题、空格等字符解析失败。
+    val query = parseQuery(raw.substringAfter('?', "").substringBefore('#'))
+    val workId = query["workid"] ?: query["id"] ?: return null
+    val courseId = query["courseid"] ?: item.courseId.takeIf { it > 0 }?.toString() ?: return null
+    val classId = query["classid"] ?: item.classId.takeIf { it > 0 }?.toString() ?: return null
     return "https://mooc1.chaoxing.com/mooc-ans/work/doHomeWorkNew" +
-        "?courseId=$courseId&classId=$classId&workId=$workId"
+        "?courseId=${encode(courseId)}&classId=${encode(classId)}&workId=${encode(workId)}"
 }
+
+private fun encode(value: String): String =
+    runCatching { URLEncoder.encode(value, "UTF-8") }.getOrDefault(value)
 
 private fun parseQuery(rawQuery: String?): Map<String, String> {
     if (rawQuery.isNullOrBlank()) return emptyMap()
     return rawQuery.split('&').mapNotNull { pair ->
         val index = pair.indexOf('=')
         if (index <= 0) return@mapNotNull null
-        val key = pair.substring(0, index)
+        val key = pair.substring(0, index).lowercase()
         val value = pair.substring(index + 1)
         key to runCatching { URLDecoder.decode(value, "UTF-8") }.getOrDefault(value)
     }.toMap()

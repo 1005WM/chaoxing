@@ -44,7 +44,7 @@ Caochaoxing 是一个面向 **macOS、iOS / iPadOS 和 Android** 的非官方学
 | 环境 | 已验证的范围 |
 | --- | --- |
 | iOS / iPadOS | Xcode 26.3 完成通用模拟器 Release 编译、链接及资源打包，并在全新的 iPhone 17 模拟器启动至登录页。此前的授权账号登录及课程、活动读取见 [iOS 验证记录](docs/VALIDATION.md)。 |
-| Android | 本 fork：`:core` 82 项 + `:app` 36 项单元测试通过（含作业/考试解析、截止时间、课程列表总览与控制器测试），Debug APK 构建成功；未重跑 Lint 与设备测试，也未在真实账号核对作业/考试接口。上游记录：Lint 12 个警告、0 个错误，API 35 模拟器 6 项设备测试通过。[活动导航测试](android/app/src/androidTest/kotlin/com/caochaoxing/android/SimulatedActivityNavigationTest.kt) · [密码表单测试](android/app/src/androidTest/kotlin/com/caochaoxing/android/PasswordRecreationTest.kt) · [此前的授权账号验证](docs/ANDROID_UI_VALIDATION.md) |
+| Android | 本 fork：`:core` 82 项 + `:app` 37 项单元测试通过（含作业/考试解析、截止时间、课程列表总览与控制器测试），Debug APK 构建成功；未重跑 Lint 与设备测试，也未在真实账号核对作业/考试接口。上游记录：Lint 12 个警告、0 个错误，API 35 模拟器 6 项设备测试通过。[活动导航测试](android/app/src/androidTest/kotlin/com/caochaoxing/android/SimulatedActivityNavigationTest.kt) · [密码表单测试](android/app/src/androidTest/kotlin/com/caochaoxing/android/PasswordRecreationTest.kt) · [此前的授权账号验证](docs/ANDROID_UI_VALIDATION.md) |
 | macOS / Swift Package | 122 项 Swift 测试通过，覆盖共享库、iOS 状态控制器和 macOS 账号操作。macOS Release 可执行文件构建及本地签名校验通过。回放测试使用模拟响应，本轮未核对线上学习记录。[macOS 回归测试](Tests/CaochaoxingMacTests/MacAppStateRegressionTests.swift) |
 
 欢迎在自己的设备上试用，并通过 GitHub Issues 反馈成功或失败的结果。如果希望验证提交后的记录，请使用由教师或管理员明确授权、与正式考勤隔离的测试班级和测试账号，并请组织者核对后台记录。

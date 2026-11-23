@@ -38,6 +38,23 @@ class AssessmentWebUrlTest {
     }
 
     @Test
+    fun mappingSurvivesChineseTitleAndUppercaseKeys() {
+        val item = ChaoxingAssessmentItem(
+            kind = ChaoxingAssessmentKind.WORK,
+            title = "任务5-2 分组查询",
+            statusText = "做作业",
+            courseId = 300001L,
+            classId = 200001,
+            taskUrl = "https://mooc1-api.chaoxing.com/work/phone/task-work" +
+                "?CourseId=300001&ClassId=200001&WorkId=9001&title=任务 5-2 分组查询",
+        )
+        assertEquals(
+            "https://mooc1.chaoxing.com/mooc-ans/work/doHomeWorkNew?courseId=300001&classId=200001&workId=9001",
+            desktopAssessmentUrl(item),
+        )
+    }
+
+    @Test
     fun examsAndIncompleteLinksStayWithoutDesktopMapping() {
         val exam = ChaoxingAssessmentItem(
             kind = ChaoxingAssessmentKind.EXAM,

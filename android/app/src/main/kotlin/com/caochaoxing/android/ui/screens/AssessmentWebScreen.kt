@@ -223,12 +223,11 @@ fun AssessmentWebScreen(
                     )
                 }
             }
+            val shownUrl = if (desktopMode) url else (mobileUrl ?: url)
+            val shownPath = shownUrl.substringAfter("://", shownUrl).substringBefore("?")
             Text(
-                text = if (desktopMode) {
-                    "电脑版网页 · 页面由学习通提供，提交等操作需你自己点击"
-                } else {
-                    "手机版网页 · 页面由学习通提供，提交等操作需你自己点击"
-                },
+                text = (if (desktopMode) "电脑版 · " else "手机版 · ") + shownPath +
+                    " · 提交等操作需你自己点击",
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(CxPalette.surfaceSecondary)
