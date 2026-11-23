@@ -37,6 +37,7 @@ internal fun AppUpdateButton() {
     if (show) AlertDialog(onDismissRequest = { show = false }, title = { Text(state.phase.label) }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("当前版本 ${BuildConfig.VERSION_NAME}")
+            UpdateDownloadProgress(state)
             state.release?.let {
                 Text("最新版本 ${it.version}")
                 if (it.publishedAt.isNotBlank()) Text("发布于 ${it.publishedAt}")
@@ -44,11 +45,6 @@ internal fun AppUpdateButton() {
                 if (it.notes.isNotBlank()) Text(it.notes)
             }
             if (state.phase == UpdatePhase.CHECKING) LinearProgressIndicator(Modifier.fillMaxWidth())
-            if (state.phase == UpdatePhase.DOWNLOADING) {
-                if (state.size > 0) LinearProgressIndicator(progress = { (state.received.toFloat() / state.size).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
-                else LinearProgressIndicator(Modifier.fillMaxWidth())
-                Text("${updateSize(state.received)} / ${if (state.size > 0) updateSize(state.size) else "未知大小"}")
-            }
             if (state.message.isNotBlank()) Text(state.message)
             if (permissionError.isNotBlank()) Text(permissionError)
         }
@@ -69,3 +65,13 @@ internal fun AppUpdateButton() {
 }
 
 private fun updateSize(bytes: Long): String = String.format(Locale.ROOT, "%.1f MB", bytes / 1048576.0)
+
+@Composable
+private fun UpdateDownloadProgress(state: com.caochaoxing.android.state.AppUpdateState) {
+    if (state.phase != UpdatePhase.DOWNLOADING) return
+    val fraction = if (state.size > 0) (state.received.toFloat() / state.size).coerceIn(0f, 1f) else null
+    Text(if (fraction != null) "下载更新 ${(fraction * 100).toInt()}%" else "正在下载更新", style = MaterialTheme.typography.bodyMedium)
+    if (fraction != null) LinearProgressIndicator(progress = { fraction }, modifier = Modifier.fillMaxWidth())
+    else LinearProgressIndicator(Modifier.fillMaxWidth())
+    Text("${updateSize(state.received)} / ${if (state.size > 0) updateSize(state.size) else "未知大小"}", style = MaterialTheme.typography.bodySmall)
+}

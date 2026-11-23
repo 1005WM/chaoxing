@@ -60,6 +60,7 @@ import com.caochaoxing.android.state.AssessmentPageExporter
 import com.caochaoxing.android.ui.theme.CxPalette
 import com.caochaoxing.android.ui.theme.CxTypography
 import com.caochaoxing.core.model.ChaoxingStoredCookie
+import kotlinx.coroutines.launch
 
 /**
  * 只实现跳转相关的桥接通知：打开网页、退出页面。
@@ -154,6 +155,9 @@ fun AssessmentWebScreen(
     var showAi by remember { mutableStateOf(false) }
     var aiQuestions by remember { mutableStateOf(emptyList<com.caochaoxing.core.service.AiQuestion>()) }
     var aiPageUrl by remember { mutableStateOf(url) }
+    var aiReadError by remember { mutableStateOf("") }
+    var readingAi by remember { mutableStateOf(false) }
+    val aiReadScope = androidx.compose.runtime.rememberCoroutineScope()
     val aiController = com.caochaoxing.android.CaochaoxingApp.from(context).aiStudyController
 
     val popupViews = remember { mutableListOf<WebView>() }
@@ -338,7 +342,7 @@ fun AssessmentWebScreen(
         webView.loadUrl(target)
     }
 
-    if (showAi) AiDraftSheet(aiPageUrl, title, aiQuestions) { showAi = false }
+    if (showAi) AiDraftSheet(aiPageUrl, title, aiQuestions, readError = aiReadError) { showAi = false }
 
     BackHandler(enabled = canGoBack && !showAi) {
         if (webView.canGoBack()) {
@@ -385,14 +389,17 @@ fun AssessmentWebScreen(
                     TextButton(onClick = {
                         val page = webView.url ?: return@TextButton
                         if (!isAllowedAssessmentUrl(page)) return@TextButton
-                        webView.evaluateJavascript(com.caochaoxing.android.state.EXTRACT_AI_QUESTIONS) { raw ->
-                            if (webView.url == page) {
-                                aiQuestions = runCatching { aiController.decodeQuestions(raw) }.getOrDefault(emptyList())
-                                aiPageUrl = page
-                                showAi = true
-                            }
+                        aiReadScope.launch {
+                            readingAi = true
+                            aiReadError = ""
+                            aiQuestions = emptyList()
+                            try { aiQuestions = aiController.readPage(webView) }
+                            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                            catch (e: Exception) { aiReadError = e.message ?: "读取题目失败，请刷新页面后重试" }
+                            finally { readingAi = false }
+                            if (webView.url == page) { aiPageUrl = page; showAi = true }
                         }
-                    }, enabled = !isLoading && !blocked) { Text("AI 作答") }
+                    }, enabled = !isLoading && !blocked && !readingAi) { Text(if (readingAi) "读题中…" else "AI 作答") }
                     if (hasMobileVariant) {
                         IconButton(onClick = { desktopMode = !desktopMode }) {
                             Icon(

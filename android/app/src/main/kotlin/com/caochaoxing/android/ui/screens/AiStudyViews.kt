@@ -79,7 +79,7 @@ internal fun AiSettingsCard() {
 }
 
 @Composable
-internal fun AiDraftSheet(id: String, title: String, questions: List<AiQuestion>?, onDismiss: () -> Unit) {
+internal fun AiDraftSheet(id: String, title: String, questions: List<AiQuestion>?, readError: String = "", onDismiss: () -> Unit) {
     val controller = CaochaoxingApp.from(LocalContext.current).aiStudyController
     val drafts by controller.drafts.collectAsState()
     val draft = drafts[id]
@@ -89,8 +89,10 @@ internal fun AiDraftSheet(id: String, title: String, questions: List<AiQuestion>
             Text("AI 作答", style = MaterialTheme.typography.titleLarge)
             Text(title, style = MaterialTheme.typography.titleMedium)
             AiSettingsCard()
+            if (readError.isNotBlank()) Text(readError, color = CxPalette.cinnabar)
+            if (questions != null && questions.isNotEmpty()) Text("已识别 ${questions.size} 道题", style = MaterialTheme.typography.bodyMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { controller.generate(id, title, questions) }, enabled = draft?.running != true) { Text("生成答案") }
+                Button(onClick = { controller.generate(id, title, questions) }, enabled = draft?.running != true && readError.isBlank()) { Text("生成答案") }
                 if (draft?.running == true) TextButton(onClick = { controller.cancel(id) }) { Text("停止") }
             }
             draft?.let {

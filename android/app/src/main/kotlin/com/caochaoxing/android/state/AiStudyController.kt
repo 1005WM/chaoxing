@@ -1,9 +1,7 @@
 package com.caochaoxing.android.state
 
-import android.annotation.SuppressLint
 import android.content.Context
 import android.webkit.WebView
-import android.webkit.WebViewClient
 import com.caochaoxing.core.model.ChaoxingChapterAttachment
 import com.caochaoxing.core.service.*
 import com.caochaoxing.android.ui.screens.isAllowedAssessmentUrl
@@ -60,12 +58,20 @@ internal const val EXTRACT_AI_QUESTIONS = """
    return source;
  }
  function scan(doc){
-   var nodes=Array.from(doc.querySelectorAll('.TiMu, .questionLi, .question-item, .questionItem'));
+   var strong='.questionLi.singleQuesId,.questionLi[data],[data-question-id]';
+   var generic='.TiMu,.questionLi,.question-item,.questionItem';
+   var nodes=Array.from(doc.querySelectorAll(strong));
+   nodes=nodes.filter(function(e){return !e.querySelector(strong);});
+   Array.from(doc.querySelectorAll(generic)).forEach(function(e){
+     if(e.matches(strong) || e.closest(strong) || e.querySelector(strong)) return;
+     if(e.querySelector(generic)) return;
+     nodes.push(e);
+   });
    nodes.forEach(function(node){
-     if(node.parentElement && node.parentElement.closest('.TiMu, .questionLi, .question-item, .questionItem')) return;
      var title=node.querySelector('.Zy_TItle, .mark_name, .question-title, .questionTitle, h3') || node;
      var text=questionText(node,doc);
-     var choices=Array.from(node.querySelectorAll('.Zy_ulTop li, .answerList li, .question-options li, .answerBg li'));
+     var choices=Array.from(node.querySelectorAll('.Zy_ulTop li, .answerList li, .question-options li, .answerBg li, ul.mark_letter > li.workTextWrap, .mark_letter > li, .answerBg'));
+     choices=choices.filter(function(e){return !e.querySelector('.answerBg, .answerBg li, .mark_letter > li, .Zy_ulTop li');});
      if(!choices.length) choices=Array.from(node.querySelectorAll('label'));
      choices=choices.filter(function(e){return e.innerText.trim() || e.querySelector('img,svg,canvas');});
      var options=choices.map(function(e){return e.innerText.trim().replace(/^[A-Z][.、．\s]+/, '') || '图片选项';});
@@ -85,6 +91,9 @@ internal const val EXTRACT_AI_QUESTIONS = """
      var typeText=(typeNode && typeNode.innerText || '')+' '+title.innerText;
      var type=typeValue==='3' || /判断/.test(typeText)?'判断':typeValue==='1' || /多选/.test(typeText)?'多选':typeValue==='0' || /单选/.test(typeText)?'单选':'文字题';
      if(type==='文字题' && /判断题/.test(text)) type='判断';
+     if(/题量\s*[:：]\s*\d+/.test(text) && !options.length && !hasImage) return;
+     if(type==='文字题' && !options.length && !hasImage &&
+       !node.querySelector('.Zy_TItle,.mark_name,.question-title,.questionTitle,.stem,.question-stem,.question-content,textarea,[contenteditable="true"]')) return;
      if(type==='判断' && !options.length) options=['正确','错误'];
      result.push({id:String(result.length),type:type,text:text,options:options,hasImage:hasImage,images:images.slice(0,7)});
    });
@@ -103,6 +112,7 @@ class AiStudyController(private val context: Context, private val appState: Andr
     val drafts = _drafts.asStateFlow()
     val api = AiAnswerService()
     private val imageReader = AiQuestionImageReader()
+    private val pageReader = AiQuestionPageReader(context, appState, ::decodeQuestions)
     private val jobs = mutableMapOf<String, Job>()
     private val automatic = mutableSetOf<String>()
     private val mutex = Mutex()
@@ -208,34 +218,7 @@ class AiStudyController(private val context: Context, private val appState: Andr
 
     fun cancel(id: String) { jobs[id]?.cancel() }
 
-    @SuppressLint("SetJavaScriptEnabled")
-    private suspend fun readQuestions(url: String): List<AiQuestion> {
-        require(isAllowedAssessmentUrl(url)) { "测验地址无效" }
-        val result = CompletableDeferred<List<AiQuestion>>()
-        val view = WebView(context).apply {
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            settings.allowFileAccess = false
-            settings.allowContentAccess = false
-            settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
-            webViewClient = object : WebViewClient() {
-                override fun shouldOverrideUrlLoading(view: WebView, request: android.webkit.WebResourceRequest): Boolean =
-                    !isAllowedAssessmentUrl(request.url.toString())
-            }
-        }
-        try {
-            com.caochaoxing.android.ui.screens.injectChaoxingCookies(appState, url)
-            view.loadUrl(url)
-            return withTimeoutOrNull(20_000) {
-                while (true) {
-                    delay(750)
-                    view.evaluateJavascript(EXTRACT_AI_QUESTIONS) { raw ->
-                        runCatching { decodeQuestions(raw) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { result.complete(it) }
-                    }
-                    if (result.isCompleted) return@withTimeoutOrNull result.await()
-                }
-                @Suppress("UNREACHABLE_CODE") emptyList()
-            } ?: error("未识别到题目。锁定测验需完成前置学习，或在题目网页中使用 AI 作答")
-        } finally { view.stopLoading(); view.destroy() }
-    }
+    suspend fun readPage(view: WebView): List<AiQuestion> = pageReader.fromView(view)
+
+    private suspend fun readQuestions(url: String): List<AiQuestion> = pageReader.fromUrl(url)
 }

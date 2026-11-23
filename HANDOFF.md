@@ -4,6 +4,7 @@
 
 - 更新源为 `1005WM/chaoxing` 的 GitHub Releases。Android 的 `UpdateSource` 和 Swift 的 `AppUpdateSource` 可配置镜像 `latest.json`。
 - Android 镜像元数据超时为 2 秒，GitHub API 失败后还会尝试 Release 的 `latest.json`。检查结果缓存 5 分钟。
+- Android 下载进度条只放在更新弹窗中，位于更新说明上方。显示百分比和已下载大小；总大小未知时显示不定进度。
 - APK 下载在应用私有缓存的 `updates` 目录，FileProvider 仅暴露此目录。安装前检查包名、签名、版本号和构建号，有 SHA256 时校验摘要。
 - 发布包沿用本机 Debug 签名，应用标识带 `.debug`。后续覆盖安装须保留同一签名并递增构建号。
 - iOS 需要配置 `iosStoreURL` 为真实 TestFlight 或 App Store 链接。macOS 通过发布资产的下载链接更新。Apple 构建依赖 macOS 和 Xcode。
@@ -18,7 +19,9 @@
 - 图片优先从已渲染网页读取。跨域题图通过独立客户端下载，按目标域名附带学习通 Cookie，再转为 Base64 图片消息。模型 Key 仅发给模型接口。
 - 单题最多 6 张图，单图输入上限 5 MB，图片最长边缩放到 2048 像素。图片读取失败会提示重试。草稿保留原题图来源，生成请求时按题转换，避免长期缓存整批 Base64 图片。
 - 判断题保留完整陈述和选项顺序。模型返回「正确／错误」时按实际选项顺序映射字母。
-- 当前页面解析覆盖常见题目容器和同源 iframe。跨域 iframe、学校定制页面和真实服务商仍需实测。
+- 电脑版按最内层题目容器分题，支持 `mark_letter` 和 `answerBg` 选项。不能把作业标题和题号导航当成题目。
+- 跨域题目 iframe 由 `AiQuestionPageReader` 用当前账号 Cookie 和原页面 UA 单独读取。只允许 HTTPS 学习通地址，单次最多 8 个页面，35 秒超时。
+- 页面有题量时会核对识别数量。未读全时提示重新读取，避免把空壳页面发给模型。模拟页已覆盖跨域框架和 5 道带图选择题。学校真实页面和真实模型仍需实测。
 
 ## Android 作业总览
 
