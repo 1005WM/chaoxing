@@ -25,6 +25,9 @@ public struct AppUpdateButton: View {
                         if let asset = release.asset {
                             if asset.size > 0 { Text(ByteCountFormatter.string(fromByteCount: asset.size, countStyle: .file)) }
                             Button("打开下载页面") { openURL(asset.url) }
+                            #if os(macOS)
+                            Link("GitHub 下载备用入口", destination: URL(string: "https://github.com/\(AppUpdateSource.repository)/releases/latest")!)
+                            #endif
                         } else {
                             #if os(iOS)
                             Text("此版本尚未配置 TestFlight 或 App Store 下载地址。")

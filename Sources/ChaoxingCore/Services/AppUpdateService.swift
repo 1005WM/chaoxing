@@ -79,7 +79,17 @@ public actor AppUpdateService {
             catch { /* Continue with the public release feed. */ }
         }
         let suffix = AppUpdateSource.includePrerelease ? "" : "/latest"
-        let object = try await document("https://api.github.com/repos/\(AppUpdateSource.repository)/releases\(suffix)", timeout: 20)
+        let object: [String: Any]
+        do {
+            object = try await document("https://api.github.com/repos/\(AppUpdateSource.repository)/releases\(suffix)", timeout: 20)
+        } catch is CancellationError { throw CancellationError() }
+        catch {
+            let metadata = try await document("https://github.com/\(AppUpdateSource.repository)/releases/latest/download/latest.json", timeout: 20)
+            let release = try parse(metadata, mirror: true)
+            cached = release
+            checkedAt = Date()
+            return release
+        }
         let release = try parse(object, mirror: false)
         cached = release
         checkedAt = Date()
