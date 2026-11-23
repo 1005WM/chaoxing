@@ -63,6 +63,7 @@ object AssessmentPageExporter {
     }
 
     private fun insert(context: Context, name: String, mime: String): Uri? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
         val values = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, name)
             put(MediaStore.Downloads.MIME_TYPE, mime)
