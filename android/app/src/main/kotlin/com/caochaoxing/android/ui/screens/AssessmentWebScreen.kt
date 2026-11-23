@@ -81,6 +81,7 @@ fun AssessmentWebScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var blocked by remember { mutableStateOf(false) }
     var canGoBack by remember { mutableStateOf(false) }
+    var currentUrl by remember(url) { mutableStateOf(url) }
 
     val webView = remember {
         WebView(context).apply {
@@ -97,11 +98,13 @@ fun AssessmentWebScreen(
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                     isLoading = true
                     errorMessage = null
+                    if (!url.isNullOrBlank()) currentUrl = url
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     isLoading = false
                     canGoBack = view?.canGoBack() == true
+                    if (!url.isNullOrBlank()) currentUrl = url
                 }
 
                 override fun onReceivedError(
@@ -165,13 +168,23 @@ fun AssessmentWebScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        text = title.ifBlank { "作业页面" },
-                        style = CxTypography.title,
-                        color = CxPalette.ink,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Column {
+                        Text(
+                            text = title.ifBlank { "作业页面" },
+                            style = CxTypography.title,
+                            color = CxPalette.ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = (if (desktopMode) "电脑版 · " else "手机版 · ") +
+                                currentUrl.substringAfter("://", currentUrl).substringBefore("?"),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = CxPalette.inkTertiary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = CxPalette.canvas,
@@ -207,7 +220,7 @@ fun AssessmentWebScreen(
             if (isLoading && !blocked) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
-            Box(modifier = Modifier.fillMaxSize()) {
+            Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
                 when {
                     blocked -> WebNotice(
                         title = "这个链接不在允许范围内",
@@ -223,11 +236,8 @@ fun AssessmentWebScreen(
                     )
                 }
             }
-            val shownUrl = if (desktopMode) url else (mobileUrl ?: url)
-            val shownPath = shownUrl.substringAfter("://", shownUrl).substringBefore("?")
             Text(
-                text = (if (desktopMode) "电脑版 · " else "手机版 · ") + shownPath +
-                    " · 提交等操作需你自己点击",
+                text = "页面由学习通提供，提交等操作需你自己点击",
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(CxPalette.surfaceSecondary)

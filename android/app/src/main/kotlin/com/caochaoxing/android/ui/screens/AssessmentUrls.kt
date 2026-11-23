@@ -26,11 +26,20 @@ internal fun desktopAssessmentUrl(item: ChaoxingAssessmentItem): String? {
     }
     // 直接按字符串取查询串，避免 java.net.URI 因为中文标题、空格等字符解析失败。
     val query = parseQuery(raw.substringAfter('?', "").substringBefore('#'))
-    val workId = query["workid"] ?: query["id"] ?: return null
-    val courseId = query["courseid"] ?: item.courseId.takeIf { it > 0 }?.toString() ?: return null
-    val classId = query["classid"] ?: item.classId.takeIf { it > 0 }?.toString() ?: return null
-    return "https://mooc1.chaoxing.com/mooc-ans/work/doHomeWorkNew" +
-        "?courseId=${encode(courseId)}&classId=${encode(classId)}&workId=${encode(workId)}"
+    val workId = query["workid"] ?: query["work_id"] ?: query["id"]
+        ?: raw.substringBefore('?').substringAfterLast('/').takeIf { it.all(Char::isDigit) && it.isNotEmpty() }
+    val courseId = query["courseid"] ?: item.courseId.takeIf { it > 0 }?.toString()
+    val classId = query["classid"] ?: item.classId.takeIf { it > 0 }?.toString()
+    if (courseId != null && classId != null && workId != null) {
+        return "https://mooc1.chaoxing.com/mooc-ans/work/doHomeWorkNew" +
+            "?courseId=${encode(courseId)}&classId=${encode(classId)}&workId=${encode(workId)}"
+    }
+    // 拿不到 workId 时至少打开这门课的电脑版作业列表，而不是继续用手机页。
+    if (courseId != null && classId != null) {
+        return "https://mooc1.chaoxing.com/mooc-ans/work/stu-work" +
+            "?courseId=${encode(courseId)}&classId=${encode(classId)}"
+    }
+    return null
 }
 
 private fun encode(value: String): String =

@@ -55,6 +55,22 @@ class AssessmentWebUrlTest {
     }
 
     @Test
+    fun missingWorkIdFallsBackToDesktopWorkList() {
+        val item = ChaoxingAssessmentItem(
+            kind = ChaoxingAssessmentKind.WORK,
+            title = "作业",
+            statusText = "做作业",
+            courseId = 300001L,
+            classId = 200001,
+            taskUrl = "https://mooc1-api.chaoxing.com/work/phone/task-work?courseId=300001&classId=200001",
+        )
+        assertEquals(
+            "https://mooc1.chaoxing.com/mooc-ans/work/stu-work?courseId=300001&classId=200001",
+            desktopAssessmentUrl(item),
+        )
+    }
+
+    @Test
     fun examsAndIncompleteLinksStayWithoutDesktopMapping() {
         val exam = ChaoxingAssessmentItem(
             kind = ChaoxingAssessmentKind.EXAM,
