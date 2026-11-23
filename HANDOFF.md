@@ -7,6 +7,7 @@
 - Android 下载进度条只放在更新弹窗中，位于更新说明上方。显示百分比和已下载大小；总大小未知时显示不定进度。
 - APK 下载在应用私有缓存的 `updates` 目录，FileProvider 仅暴露此目录。安装前检查包名、签名、版本号和构建号，有 SHA256 时校验摘要。
 - 发布包沿用本机 Debug 签名，应用标识带 `.debug`。后续覆盖安装须保留同一签名并递增构建号。
+- App 图标原图位于 `docs/artwork/Avatar.png`。Windows 用 `render-icon.ps1`，macOS 用 `render-icon.swift` 生成三端尺寸。彩色人物图不配置 Android `monochrome`，否则不透明照片会被整块染色。iOS 资源须为 1024 像素无透明通道 PNG。
 - iOS 需要配置 `iosStoreURL` 为真实 TestFlight 或 App Store 链接。macOS 通过发布资产的下载链接更新。Apple 构建依赖 macOS 和 Xcode。
 - 作业和考试并发读取时，重登会使另一请求的旧会话失效。两边均失败时优先显示实际的登录失败原因。
 

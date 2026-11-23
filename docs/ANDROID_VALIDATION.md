@@ -69,4 +69,4 @@ Debug APK 已使用 `adb install -r` 安装并启动。取得了模拟器真实�
 
 ## 后续图标资源更新
 
-本文前述记录对应当时测试的构建。当前的黑白漫画头像及生成方法见[启动图标说明](artwork/ANDROID_ICON.md)，最新一次验证结果见 [README](../README.md#验证状态)。
+本文前述记录对应当时测试的构建。当前的彩色人物图标及生成方法见[启动图标说明](artwork/ANDROID_ICON.md)，最新一次验证结果见 [README](../README.md#验证状态)。

@@ -1,7 +1,11 @@
-# 爱丽丝读绘本图标
+# 彩色人物图标
 
-三端使用《BLACK SOULS II》中爱丽丝捧着绘本的画面。图标将截图转为灰度，收平了嘴角，并在四周留白。公开使用这张游戏画面的授权待确认。[游戏截图](https://fgguides.com/wp-content/uploads/2024/10/Daughter-Alice.png) · [素材归属](../../THIRD_PARTY_NOTICES.md#图标及其他素材)
+三端使用用户提供的蓝色人物插画。保留原始画面和颜色，按平台规格居中裁切及缩放，不做 AI 重绘。原图保存在 [Avatar.png](Avatar.png)。
 
-定稿是 704 × 704 的灰度 PNG。在 Mac 上从仓库根目录运行 `swift docs/artwork/render-icon.swift`，可导出 iOS 的 1024 像素不透明图标、macOS Dock 图标以及 Android 自适应图标。Android 的主题图标按画面明暗生成透明蒙版，由启动器着色。[图标定稿](Avatar.png)
+- Android：432 × 432 彩色自适应前景，圆形及圆角由启动器裁切。照片类图标不设置单色主题蒙版，避免整块变成纯色。
+- iOS：1024 × 1024 不透明正方形，由系统添加圆角。
+- macOS：1024 × 1024，保留 Dock 图标的透明边距和圆角。
 
-![圆形、圆角方形及单色主题预览](AndroidAppIcon-preview.png)
+Windows 在仓库根目录运行 `./docs/artwork/render-icon.ps1`；macOS 运行 `swift docs/artwork/render-icon.swift`。两份脚本都只生成平台资源尺寸，不修改原图。
+
+![圆形和圆角方形预览](AndroidAppIcon-preview.png)
