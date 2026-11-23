@@ -102,19 +102,18 @@ internal fun AiDraftSheet(id: String, title: String, questions: List<AiQuestion>
             draft?.let {
                 if (it.running) LinearProgressIndicator(Modifier.fillMaxWidth())
                 Text("${it.message}  ${it.answers.size} / ${it.questions.size}")
-                it.questions.forEach { question ->
-                    HorizontalDivider()
-                    Text(question.text, style = MaterialTheme.typography.titleMedium)
-                    if (question.images.isNotEmpty()) Text("本题包含 ${question.images.size} 张题图", style = MaterialTheme.typography.bodySmall)
-                    question.options.forEachIndexed { index, option -> Text("${'A' + index}  $option") }
-                    it.answers[question.id]?.let { answer ->
-                        var edited by remember(id, question.id, answer) { mutableStateOf(answer.answer) }
-                        OutlinedTextField(edited, { edited = it }, label = { Text("建议答案") }, modifier = Modifier.fillMaxWidth())
-                        Text(answer.explanation)
-                        TextButton(onClick = { clipboard.setText(AnnotatedString(edited)) }) { Text("复制答案") }
+                it.questions.forEachIndexed { index, question ->
+                    AiQuestionCard(question, index + 1, showImages = false) {
+                        if (it.answers[question.id] != null || it.errors[question.id] != null) HorizontalDivider(color = CxPalette.border)
+                        it.answers[question.id]?.let { answer ->
+                            var edited by remember(id, question.id, answer) { mutableStateOf(answer.answer) }
+                            OutlinedTextField(edited, { edited = it }, label = { Text("建议答案") }, modifier = Modifier.fillMaxWidth())
+                            Text(answer.explanation)
+                            TextButton(onClick = { clipboard.setText(AnnotatedString(edited)) }) { Text("复制答案") }
+                        }
+                        it.errors[question.id]?.let { error -> Text(error, color = CxPalette.cinnabar) }
+                        TextButton(onClick = { controller.generate(id, title, it.questions, retryId = question.id) }, enabled = !it.running) { Text("重试本题") }
                     }
-                    it.errors[question.id]?.let { error -> Text(error, color = CxPalette.cinnabar) }
-                    TextButton(onClick = { controller.generate(id, title, it.questions, retryId = question.id) }, enabled = !it.running) { Text("重试本题") }
                 }
             }
             Spacer(Modifier.height(24.dp))

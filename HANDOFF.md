@@ -30,6 +30,7 @@
 - 硬件加速的 WebView 不能依赖 `draw(Canvas)` 截图，可能得到白图。`AiQuestionScreenshot` 用 PixelCopy 读取窗口像素；后台章节页面仅在需要截图时创建私有显示窗口，结束后释放。不会新增录屏权限或常驻截图服务。
 - 截图只包含题目，遮蔽答案解析、输入框、其他题和题外浮层。结束或取消时恢复样式和滚动位置。补扫计数阶段不重复编码图片。
 - 「查看识别内容」可预览提取的文字和实际题图。模拟器测试核对 SVG 像素、题干与选项标签、模型请求中的图片消息、屏外选项、题外内容隔离和后台窗口释放。实际作业仍需用其 DOM 和真实模型核对。
+- 预览与作答列表共用 `AiQuestionCard`。每题单独加框，题干底色较深，选项底色较浅。只在展示时去掉重复选项，原题数据不变。作答列表保留图片提示，实际题图在预览中按题加载，避免长作业同时解码全部图片。
 - 调研参考：[OCS 结构化图文提取](https://github.com/ocsjs/ocsjs/blob/09628b7c5df3e91317cb758e7f38b8bcf49e2ff6/packages/scripts/src/utils/work.ts#L369)与[学习通 AI 助手的公式和媒体处理](https://github.com/zhu-hailin/chaoxing-ai-assistant/blob/64d50ffb04610edc4592480df0e754a2817ac2fd/sources/question-parser.js#L62)。
 
 ## Android 作业总览
