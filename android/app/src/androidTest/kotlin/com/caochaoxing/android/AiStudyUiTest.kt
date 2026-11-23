@@ -164,10 +164,12 @@ class AiStudyUiTest {
         assumeTrue(original.key.isBlank())
         val apiField = AiStudyController::class.java.getDeclaredField("api").apply { isAccessible = true }
         val originalApi = apiField.get(controller)
+        val answerRequests = java.util.concurrent.atomic.AtomicInteger()
         val fake = AiAnswerService(OkHttpClient.Builder().addInterceptor { chain ->
             val body = if (chain.request().url.encodedPath.endsWith("models")) {
                 """{"data":[{"id":"study-model"},{"id":"study-model-pro"}]}"""
             } else {
+                answerRequests.incrementAndGet()
                 """{"choices":[{"message":{"content":"{\"answer\":\"B\",\"explanation\":\"队列从队尾入队，从队首出队，因此先进入的元素先离开。\"}"}}]}"""
             }
             Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK").body(body.toResponseBody()).build()
@@ -222,9 +224,23 @@ class AiStudyUiTest {
                 waitFor("建议答案")
                 waitFor("队列从队尾入队")
                 capture("answer")
+                scenario.onActivity { activity ->
+                    val partial = (1..4).map { AiQuestion("partial-$it", "单选", "第 $it 题：哪种结构遵循先进先出？", listOf("栈", "队列")) }
+                    activity.setContent { CaochaoxingTheme {
+                        AiDraftSheet("fixture-partial", "识别到的题目", partial,
+                            readWarning = "页面共 5 道题，已识别 4 道，将解答已识别的题目。其余题目可加载后重新读取") {}
+                    } }
+                }
+                waitFor("页面共 5 道题，已识别 4 道")
+                click("生成答案")
+                waitFor("生成结束")
+                assertEquals(4, controller.drafts.value.getValue("fixture-partial").answers.size)
+                assertEquals(4, controller.drafts.value.getValue("fixture-partial").questions.size)
+                assertEquals(5, answerRequests.get())
+                capture("partial")
             }
         } finally {
-            instrumentation.runOnMainSync { controller.save(original); controller.cancel("fixture-draft") }
+            instrumentation.runOnMainSync { controller.save(original); controller.cancel("fixture-draft"); controller.cancel("fixture-partial") }
             apiField.set(controller, originalApi)
         }
     }

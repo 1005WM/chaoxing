@@ -156,6 +156,7 @@ fun AssessmentWebScreen(
     var aiQuestions by remember { mutableStateOf(emptyList<com.caochaoxing.core.service.AiQuestion>()) }
     var aiPageUrl by remember { mutableStateOf(url) }
     var aiReadError by remember { mutableStateOf("") }
+    var aiReadWarning by remember { mutableStateOf("") }
     var readingAi by remember { mutableStateOf(false) }
     val aiReadScope = androidx.compose.runtime.rememberCoroutineScope()
     val aiController = com.caochaoxing.android.CaochaoxingApp.from(context).aiStudyController
@@ -342,7 +343,7 @@ fun AssessmentWebScreen(
         webView.loadUrl(target)
     }
 
-    if (showAi) AiDraftSheet(aiPageUrl, title, aiQuestions, readError = aiReadError) { showAi = false }
+    if (showAi) AiDraftSheet(aiPageUrl, title, aiQuestions, readError = aiReadError, readWarning = aiReadWarning) { showAi = false }
 
     BackHandler(enabled = canGoBack && !showAi) {
         if (webView.canGoBack()) {
@@ -392,8 +393,13 @@ fun AssessmentWebScreen(
                         aiReadScope.launch {
                             readingAi = true
                             aiReadError = ""
+                            aiReadWarning = ""
                             aiQuestions = emptyList()
-                            try { aiQuestions = aiController.readPage(webView) }
+                            try {
+                                val page = aiController.readPage(webView)
+                                aiQuestions = page.questions
+                                aiReadWarning = page.warning
+                            }
                             catch (e: kotlinx.coroutines.CancellationException) { throw e }
                             catch (e: Exception) { aiReadError = e.message ?: "读取题目失败，请刷新页面后重试" }
                             finally { readingAi = false }

@@ -25,12 +25,12 @@ internal const val EXTRACT_AI_QUESTIONS = """
 (function(){
  var result=[];
  var excluded='script,style,noscript,textarea,button,input,iframe,[hidden],[aria-hidden="true"],.mark_answer,.answer-analysis,.analysis,.correctAnswer,.teacherComment,[contenteditable="true"]';
- function questionText(node,doc){
+ function questionText(node,doc,nodes){
    var copy=node.cloneNode(true);
    var originals=Array.from(node.querySelectorAll('*')), clones=Array.from(copy.querySelectorAll('*'));
    originals.forEach(function(e,index){
      var style=doc.defaultView.getComputedStyle(e);
-     if(style.display==='none' || style.visibility==='hidden') clones[index].remove();
+     if(style.display==='none' || style.visibility==='hidden' || nodes.indexOf(e)>=0) clones[index].remove();
    });
    Array.from(copy.querySelectorAll(excluded)).forEach(function(e){e.remove();});
    Array.from(copy.querySelectorAll('br')).forEach(function(e){e.replaceWith(doc.createTextNode('\n'));});
@@ -58,8 +58,10 @@ internal const val EXTRACT_AI_QUESTIONS = """
    return source;
  }
  function scan(doc){
-   var strong='.questionLi.singleQuesId,.questionLi[data],[data-question-id]';
+   var strong='.singleQuesId,.questionLi[data],[data-question-id]';
    var generic='.TiMu,.questionLi,.question-item,.questionItem';
+   var headings='.Zy_TItle,.mark_name,.question-title,.questionTitle';
+   var types='input[name^="type"],input[id^="type"]';
    var nodes=Array.from(doc.querySelectorAll(strong));
    nodes=nodes.filter(function(e){return !e.querySelector(strong);});
    Array.from(doc.querySelectorAll(generic)).forEach(function(e){
@@ -67,17 +69,31 @@ internal const val EXTRACT_AI_QUESTIONS = """
      if(e.querySelector(generic)) return;
      nodes.push(e);
    });
+   // Some desktop pages use a different container for the first or last question.
+   Array.from(doc.querySelectorAll(headings+','+types)).forEach(function(title){
+     if(nodes.some(function(e){return e.contains(title);})) return;
+     var node=title.closest(strong+','+generic);
+     if(!node){
+       node=title.parentElement;
+       var marker=title.matches('input')?types:headings;
+       while(node && node.parentElement && node.parentElement!==doc.body && node.parentElement.querySelectorAll(marker).length===1) node=node.parentElement;
+     }
+     if(node && node!==doc.body && nodes.indexOf(node)<0) nodes.push(node);
+   });
+   nodes.sort(function(a,b){return a===b?0:(a.compareDocumentPosition(b)&4?-1:1);});
    nodes.forEach(function(node){
-     var title=node.querySelector('.Zy_TItle, .mark_name, .question-title, .questionTitle, h3') || node;
-     var text=questionText(node,doc);
+     function owned(e){return !nodes.some(function(other){return other!==node && node.contains(other) && other.contains(e);});}
+     var title=Array.from(node.querySelectorAll(headings+',h3')).find(owned) || node;
+     var text=questionText(node,doc,nodes);
      var choices=Array.from(node.querySelectorAll('.Zy_ulTop li, .answerList li, .question-options li, .answerBg li, ul.mark_letter > li.workTextWrap, .mark_letter > li, .answerBg'));
+     choices=choices.filter(owned);
      choices=choices.filter(function(e){return !e.querySelector('.answerBg, .answerBg li, .mark_letter > li, .Zy_ulTop li');});
-     if(!choices.length) choices=Array.from(node.querySelectorAll('label'));
+     if(!choices.length) choices=Array.from(node.querySelectorAll('label')).filter(owned);
      choices=choices.filter(function(e){return e.innerText.trim() || e.querySelector('img,svg,canvas');});
      var options=choices.map(function(e){return e.innerText.trim().replace(/^[A-Z][.、．\s]+/, '') || '图片选项';});
      var images=[];
      var stemImages=Array.from(node.querySelectorAll('img,canvas')).filter(function(e){
-       return !choices.some(function(choice){return choice.contains(e);}) && !e.closest(excluded);
+       return owned(e) && !choices.some(function(choice){return choice.contains(e);}) && !e.closest(excluded);
      });
      stemImages.forEach(function(e,index){images.push({label:'题干图片 '+(index+1),source:picture(e,doc)});});
      choices.forEach(function(choice,index){Array.from(choice.querySelectorAll('img,canvas')).forEach(function(e,n){
@@ -86,7 +102,7 @@ internal const val EXTRACT_AI_QUESTIONS = """
      var hasImage=images.length>0 || !!title.querySelector('svg') || choices.some(function(e){return !!e.querySelector('svg');});
      if(!text && !hasImage) return;
      if(!text) text='图片题';
-     var typeNode=node.querySelector('input[name^="type"],input[id^="type"],.question-type,.type_tit,.mark_type');
+     var typeNode=Array.from(node.querySelectorAll('input[name^="type"],input[id^="type"],.question-type,.type_tit,.mark_type')).find(owned);
      var typeValue=typeNode && typeNode.value;
      var typeText=(typeNode && typeNode.innerText || '')+' '+title.innerText;
      var type=typeValue==='3' || /判断/.test(typeText)?'判断':typeValue==='1' || /多选/.test(typeText)?'多选':typeValue==='0' || /单选/.test(typeText)?'单选':'文字题';
@@ -218,7 +234,7 @@ class AiStudyController(private val context: Context, private val appState: Andr
 
     fun cancel(id: String) { jobs[id]?.cancel() }
 
-    suspend fun readPage(view: WebView): List<AiQuestion> = pageReader.fromView(view)
+    suspend fun readPage(view: WebView): AiQuestionPage = pageReader.fromView(view)
 
-    private suspend fun readQuestions(url: String): List<AiQuestion> = pageReader.fromUrl(url)
+    private suspend fun readQuestions(url: String): List<AiQuestion> = pageReader.fromUrl(url).questions
 }
