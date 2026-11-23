@@ -91,6 +91,7 @@ import com.caochaoxing.android.ui.components.CxPrimaryButton
 import com.caochaoxing.android.ui.components.CxTone
 import com.caochaoxing.android.ui.screens.AssessmentTodoScreen
 import com.caochaoxing.android.ui.screens.AssessmentWebScreen
+import com.caochaoxing.android.ui.screens.desktopAssessmentUrl
 import com.caochaoxing.android.ui.screens.COURSE_SUBTAB_ASSESSMENT
 import com.caochaoxing.android.ui.screens.COURSE_SUBTAB_SIGN
 import com.caochaoxing.android.ui.screens.CourseDetailScreen
@@ -156,7 +157,7 @@ private object CxRoutes {
     const val MAIN = "main"
     const val COURSE_DETAIL = "course_detail/{courseKey}?tab={tab}"
     const val ASSESSMENT_TODO = "assessment_todo"
-    const val ASSESSMENT_WEB = "assessment_web?url={url}&title={title}"
+    const val ASSESSMENT_WEB = "assessment_web?url={url}&mobile={mobile}&title={title}"
     const val GROUP_DETAIL = "group_detail/{encodedGroupId}"
     const val OTHER_USERS = "other_users"
     const val LOCATION_PRESETS = "location_presets"
@@ -172,8 +173,15 @@ private object CxRoutes {
         }
     }
 
-    fun assessmentWeb(url: String, title: String): String =
-        "assessment_web?url=${Uri.encode(url)}&title=${Uri.encode(title)}"
+    fun assessmentWeb(url: String, mobileUrl: String? = null, title: String = ""): String = buildString {
+        append("assessment_web?url=").append(Uri.encode(url))
+        if (!mobileUrl.isNullOrBlank()) {
+            append("&mobile=").append(Uri.encode(mobileUrl))
+        }
+        if (title.isNotBlank()) {
+            append("&title=").append(Uri.encode(title))
+        }
+    }
 
     fun groupDetail(groupId: String): String {
         val encoded = Base64.getUrlEncoder()
@@ -186,6 +194,19 @@ private object CxRoutes {
         runCatching {
             Base64.getUrlDecoder().decode(encoded).toString(Charsets.UTF_8)
         }.getOrDefault("")
+}
+
+/** 作业优先打开电脑版作业页，考试保持原链接；两者都能在网页里再切换版本。 */
+private fun openAssessmentPage(
+    navController: androidx.navigation.NavHostController,
+    item: com.caochaoxing.core.model.ChaoxingAssessmentItem,
+) {
+    val raw = item.taskUrl?.takeIf { it.isNotBlank() }
+    val desktop = desktopAssessmentUrl(item)
+    when {
+        desktop != null -> navController.navigate(CxRoutes.assessmentWeb(desktop, raw, item.title))
+        raw != null -> navController.navigate(CxRoutes.assessmentWeb(raw, null, item.title))
+    }
 }
 
 private data class MainTabSpec(
@@ -596,9 +617,7 @@ private fun AuthenticatedMainContainer(
                 courseStudyController = courseStudyController,
                 initialSubTab = initialTab,
                 onOpenAssessmentPage = { item ->
-                    item.taskUrl?.takeIf { it.isNotBlank() }?.let { taskUrl ->
-                        navController.navigate(CxRoutes.assessmentWeb(taskUrl, item.title))
-                    }
+                    openAssessmentPage(navController, item)
                 },
             )
         }
@@ -611,9 +630,7 @@ private fun AuthenticatedMainContainer(
                     navController.navigate(CxRoutes.courseDetail(course.id, tab = COURSE_SUBTAB_ASSESSMENT))
                 },
                 onOpenWeb = { item ->
-                    item.taskUrl?.takeIf { it.isNotBlank() }?.let { taskUrl ->
-                        navController.navigate(CxRoutes.assessmentWeb(taskUrl, item.title))
-                    }
+                    openAssessmentPage(navController, item)
                 },
             )
         }
@@ -622,6 +639,10 @@ private fun AuthenticatedMainContainer(
             route = CxRoutes.ASSESSMENT_WEB,
             arguments = listOf(
                 navArgument("url") { type = NavType.StringType },
+                navArgument("mobile") {
+                    type = NavType.StringType
+                    defaultValue = ""
+                },
                 navArgument("title") {
                     type = NavType.StringType
                     defaultValue = ""
@@ -631,6 +652,7 @@ private fun AuthenticatedMainContainer(
             AssessmentWebScreen(
                 appState = appState,
                 url = backStackEntry.arguments?.getString("url").orEmpty(),
+                mobileUrl = backStackEntry.arguments?.getString("mobile")?.takeIf { it.isNotBlank() },
                 title = backStackEntry.arguments?.getString("title").orEmpty(),
                 onBack = { navController.popBackStack() },
             )

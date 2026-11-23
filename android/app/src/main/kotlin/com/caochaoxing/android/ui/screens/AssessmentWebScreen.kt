@@ -21,11 +21,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.rounded.DesktopWindows
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -54,24 +54,32 @@ import com.caochaoxing.android.ui.theme.CxTypography
 import com.caochaoxing.core.model.ChaoxingStoredCookie
 import java.net.URI
 
+private const val DESKTOP_USER_AGENT =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
 /**
- * 用当前账号的 Cookie 在应用内打开作业 / 考试的网页，只展示页面，不注入脚本、不自动提交。
+ * 用当前账号的 Cookie 在应用内打开作业 / 考试网页。
  *
- * 只允许 https 的 `*.chaoxing.com` 地址；其他链接会被拒绝，避免把会话带到外部站点。
+ * 默认加载电脑版（宽视口 + 桌面 UA），可一键切回手机版；只展示页面，
+ * 不注入脚本、不调用提交/开始接口。只允许 https 的 `*.chaoxing.com`。
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun AssessmentWebScreen(
     appState: AndroidAppState,
     url: String,
+    mobileUrl: String?,
     title: String,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val allowed = remember(url) { isAllowedAssessmentUrl(url) }
+    val hasMobileVariant = !mobileUrl.isNullOrBlank() && mobileUrl != url
+    var desktopMode by remember(url) { mutableStateOf(hasMobileVariant) }
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var blocked by remember { mutableStateOf(false) }
     var canGoBack by remember { mutableStateOf(false) }
 
     val webView = remember {
@@ -88,6 +96,7 @@ fun AssessmentWebScreen(
             webViewClient = object : WebViewClient() {
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                     isLoading = true
+                    errorMessage = null
                 }
 
                 override fun onPageFinished(view: WebView?, url: String?) {
@@ -109,6 +118,18 @@ fun AssessmentWebScreen(
             }
         }
     }
+    val defaultUserAgent = remember(webView) { webView.settings.userAgentString }
+
+    fun applyMode(desktop: Boolean) {
+        webView.settings.apply {
+            userAgentString = if (desktop) DESKTOP_USER_AGENT else defaultUserAgent
+            useWideViewPort = desktop
+            loadWithOverviewMode = desktop
+            builtInZoomControls = desktop
+            displayZoomControls = false
+            setSupportZoom(desktop)
+        }
+    }
 
     DisposableEffect(webView) {
         onDispose {
@@ -117,11 +138,17 @@ fun AssessmentWebScreen(
         }
     }
 
-    LaunchedEffect(url, allowed) {
-        if (!allowed) return@LaunchedEffect
-        errorMessage = null
-        injectChaoxingCookies(appState, url)
-        webView.loadUrl(url)
+    LaunchedEffect(url, mobileUrl, desktopMode) {
+        val target = if (desktopMode) url else (mobileUrl ?: url)
+        if (!isAllowedAssessmentUrl(target)) {
+            blocked = true
+            isLoading = false
+            return@LaunchedEffect
+        }
+        blocked = false
+        applyMode(desktopMode)
+        injectChaoxingCookies(appState, target)
+        webView.loadUrl(target)
     }
 
     BackHandler(enabled = canGoBack) {
@@ -156,7 +183,20 @@ fun AssessmentWebScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { if (allowed) webView.reload() }, enabled = allowed) {
+                    if (hasMobileVariant) {
+                        IconButton(onClick = { desktopMode = !desktopMode }) {
+                            Icon(
+                                imageVector = if (desktopMode) {
+                                    Icons.Rounded.Smartphone
+                                } else {
+                                    Icons.Rounded.DesktopWindows
+                                },
+                                contentDescription = if (desktopMode) "切换到手机版" else "切换到电脑版",
+                                tint = CxPalette.accent,
+                            )
+                        }
+                    }
+                    IconButton(onClick = { if (!blocked) webView.reload() }, enabled = !blocked) {
                         Icon(Icons.Rounded.Refresh, contentDescription = "刷新", tint = CxPalette.accent)
                     }
                 },
@@ -164,12 +204,12 @@ fun AssessmentWebScreen(
         },
     ) { innerPadding ->
         Column(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
-            if (isLoading && allowed) {
+            if (isLoading && !blocked) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
             Box(modifier = Modifier.fillMaxSize()) {
                 when {
-                    !allowed -> WebNotice(
+                    blocked -> WebNotice(
                         title = "这个链接不在允许范围内",
                         detail = "只允许打开 https 的 chaoxing.com 页面，避免会话被带到外部站点。",
                     )
@@ -182,12 +222,13 @@ fun AssessmentWebScreen(
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
-                if (!allowed || errorMessage != null) {
-                    // 错误态已经覆盖，隐藏 WebView 的空白区域
-                }
             }
             Text(
-                text = "只显示页面，不会自动开始或提交作业",
+                text = if (desktopMode) {
+                    "电脑版网页 · 页面由学习通提供，提交等操作需你自己点击"
+                } else {
+                    "手机版网页 · 页面由学习通提供，提交等操作需你自己点击"
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(CxPalette.surfaceSecondary)
@@ -243,7 +284,6 @@ private fun injectChaoxingCookies(appState: AndroidAppState, url: String) {
                 if (cookie.isSecure) append("; secure")
             }
             manager.setCookie(url, value)
-            // 同时按域名写入，兼容子域页面（例如 mobilelearn / mooc1-api）。
             val domain = cookie.domain.trim().trimStart('.')
             if (domain.isNotBlank()) {
                 manager.setCookie("https://$domain/", value)
