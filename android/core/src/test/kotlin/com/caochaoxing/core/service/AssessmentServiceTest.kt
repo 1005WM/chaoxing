@@ -310,7 +310,7 @@ class AssessmentServiceTest {
                     course = course,
                 )
             }
-            assertTrue(error is ChaoxingError.LoginFailed)
+            assertTrue(error is ChaoxingError.LoginFailed, "Actual error: ${error::class.simpleName} ${error.message}")
             assertTrue(error.message.orEmpty().contains("用户名或密码错误"))
         } finally {
             server.shutdown()

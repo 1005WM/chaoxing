@@ -43,7 +43,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -63,7 +65,7 @@ import com.caochaoxing.core.model.ChaoxingCourse
 import kotlinx.coroutines.launch
 
 /**
- * 全部课程的未完成作业 / 考试清单：按科目分组，点条目回到该课程。
+ * 按课程分组的待办。点击课程名称进入该课程的作业分栏。
  */
 @Composable
 fun AssessmentTodoScreen(
@@ -153,8 +155,9 @@ private fun TodoListContent(
     val pending = state.pendingItems
     val grouped = remember(pending) {
         pending
-            .groupBy { it.courseName.ifBlank { "未知课程" } }
-            .toSortedMap()
+            .groupBy { it.courseId to it.classId }
+            .values
+            .sortedBy { it.first().courseName }
     }
 
     LazyColumn(
@@ -176,7 +179,7 @@ private fun TodoListContent(
                     color = CxPalette.ink,
                 )
                 Text(
-                    text = "作业 ${state.pendingWorkCount} 项 · 考试 ${state.pendingExamCount} 项 · 涉及 ${state.pendingCourseCount} 门课程",
+                    text = "作业 ${state.pendingWorkCount} 项，考试 ${state.pendingExamCount} 项，涉及 ${state.pendingCourseCount} 门课程",
                     style = MaterialTheme.typography.bodySmall,
                     color = CxPalette.inkSecondary,
                 )
@@ -202,10 +205,10 @@ private fun TodoListContent(
         } else if (pending.isEmpty()) {
             item(key = "todo_empty") {
                 Text(
-                    text = if (state.hasLoadedAny) {
-                        "这个账号下的作业和考试都完成了。"
-                    } else {
-                        "还没有读取到课程作业，下拉或点右上角刷新。"
+                    text = when {
+                        state.errors.isNotEmpty() -> "已读取的课程没有待办。"
+                        state.hasLoadedAny -> "这个账号下的作业和考试都完成了。"
+                        else -> "还没有读取到课程作业，下拉或点右上角刷新。"
                     },
                     modifier = Modifier.padding(vertical = 24.dp),
                     style = MaterialTheme.typography.bodySmall,
@@ -213,39 +216,48 @@ private fun TodoListContent(
                 )
             }
         } else {
-        grouped.forEach { (courseName, items) ->
-            item(key = "todo_header_$courseName") {
-                CxSectionHeader(
-                    title = courseName,
-                    trailing = "${items.size} 项待处理",
-                    modifier = Modifier.padding(top = 10.dp, bottom = 2.dp),
-                )
-            }
-            items(
-                items = items.sortedWith(
-                    compareBy<ChaoxingAssessmentItem> { it.deadlineAtMs ?: Long.MAX_VALUE }
-                        .thenBy { it.title },
-                ),
-                key = { "${it.kind.name}_${it.title}_${it.courseId}_${it.classId}" },
-            ) { item ->
-                TodoRow(
-                    item = item,
-                    onClick = {
-                        if (!item.taskUrl.isNullOrBlank()) onOpenWeb(item) else onCourseClick(item)
-                    },
-                )
+            grouped.forEach { items ->
+                val courseItem = items.first()
+                item(key = "todo_header_${courseItem.courseId}_${courseItem.classId}") {
+                    CxSectionHeader(
+                        title = courseItem.courseName.ifBlank { "未知课程" },
+                        trailing = "${items.size} 项 ›",
+                        modifier = Modifier
+                            .padding(top = 10.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(
+                                role = Role.Button,
+                                onClickLabel = "打开课程作业",
+                                onClick = { onCourseClick(courseItem) },
+                            )
+                            .padding(vertical = 12.dp),
+                    )
+                }
+                items(
+                    items = items.sortedWith(
+                        compareBy<ChaoxingAssessmentItem> { it.deadlineAtMs ?: Long.MAX_VALUE }
+                            .thenBy { it.title },
+                    ),
+                    key = { "${it.kind.name}_${it.title}_${it.courseId}_${it.classId}" },
+                ) { item ->
+                    TodoRow(
+                        item = item,
+                        onClick = {
+                            if (!item.taskUrl.isNullOrBlank()) onOpenWeb(item) else onCourseClick(item)
+                        },
+                    )
+                }
             }
         }
 
-            if (state.errors.isNotEmpty()) {
-                item(key = "todo_errors") {
-                    Text(
-                        text = "${state.errors.size} 门课程读取失败，可回到课程列表下拉重试",
-                        modifier = Modifier.padding(top = 12.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = CxPalette.inkTertiary,
-                    )
-                }
+        if (state.errors.isNotEmpty()) {
+            item(key = "todo_errors") {
+                Text(
+                    text = "${state.errors.size} 门课程读取失败，可下拉重试",
+                    modifier = Modifier.padding(top = 12.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = CxPalette.inkSecondary,
+                )
             }
         }
     }

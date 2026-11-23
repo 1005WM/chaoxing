@@ -50,6 +50,10 @@ data class AssessmentOverviewState(
     val pendingWorkCount: Int
         get() = summaries.values.sumOf { summary -> summary.works.count { it.status.isPending } }
 
+    fun overdueWorkCount(nowMs: Long): Int = summaries.values.sumOf { summary ->
+        summary.works.count { it.status.isExpired || (it.isPending && it.isOverdueAt(nowMs)) }
+    }
+
     val pendingExamCount: Int
         get() = summaries.values.sumOf { summary -> summary.exams.count { it.status.isPending } }
 

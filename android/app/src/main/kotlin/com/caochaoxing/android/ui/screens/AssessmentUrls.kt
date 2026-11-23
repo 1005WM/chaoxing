@@ -5,42 +5,95 @@ package com.caochaoxing.android.ui.screens
 
 import com.caochaoxing.core.model.ChaoxingAssessmentItem
 import com.caochaoxing.core.model.ChaoxingAssessmentKind
+import java.net.URI
 import java.net.URLDecoder
 import java.net.URLEncoder
+import java.util.Locale
 
-/**
- * 把手机列表页里的作业链接换成学习通电脑版作业页。
- *
- * 手机页：`/work/phone/task-work?courseId=…&classId=…&workId=…`
- * 电脑页：`/mooc-ans/work/doHomeWorkNew?courseId=…&classId=…&workId=…`
- *
- * 只转换作业；考试页不转换（考试入口可能涉及开考状态，保持原样更安全）。
- */
-internal fun desktopAssessmentUrl(item: ChaoxingAssessmentItem): String? {
+private const val DESKTOP_WORK_BASE = "https://mooc1.chaoxing.com/mooc-ans"
+private const val DESKTOP_COURSE_PATH = "/visit/stucoursemiddle"
+
+/** 优先使用服务端已给出的电脑版作业链接。考试保持原链接。 */
+internal fun desktopAssessmentUrl(item: ChaoxingAssessmentItem, courseCpi: Long? = null): String? {
     if (item.kind != ChaoxingAssessmentKind.WORK) return null
     val raw = item.taskUrl?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-    if (!raw.startsWith("http://", ignoreCase = true) &&
-        !raw.startsWith("https://", ignoreCase = true)
-    ) {
-        return null
-    }
-    // 直接按字符串取查询串，避免 java.net.URI 因为中文标题、空格等字符解析失败。
+    val path = assessmentPath(raw) ?: return null
+    if (isDesktopAssessmentPath(path)) return raw.replaceFirst(Regex("^http://", RegexOption.IGNORE_CASE), "https://")
+
     val query = parseQuery(raw.substringAfter('?', "").substringBefore('#'))
     val workId = query["workid"] ?: query["work_id"] ?: query["id"]
-        ?: raw.substringBefore('?').substringAfterLast('/').takeIf { it.all(Char::isDigit) && it.isNotEmpty() }
-    val courseId = query["courseid"] ?: item.courseId.takeIf { it > 0 }?.toString()
-    val classId = query["classid"] ?: item.classId.takeIf { it > 0 }?.toString()
-    if (courseId != null && classId != null && workId != null) {
-        return "https://mooc1.chaoxing.com/mooc-ans/work/doHomeWorkNew" +
-            "?courseId=${encode(courseId)}&classId=${encode(classId)}&workId=${encode(workId)}"
+        ?: path.substringAfterLast('/').takeIf { it.isNotEmpty() && it.all(Char::isDigit) }
+    val courseId = query["courseid"] ?: item.courseId.takeIf { it > 0 }?.toString() ?: return null
+    val classId = query["classid"] ?: query["clazzid"] ?: item.classId.takeIf { it > 0 }?.toString() ?: return null
+    val parameters = linkedMapOf("courseId" to courseId, "classId" to classId)
+    val cpi = query["cpi"] ?: courseCpi?.takeIf { it > 0 }?.toString()
+    cpi?.let { parameters["cpi"] = it }
+    val target = when {
+        workId == null -> return desktopCourseUrl(courseId, classId, cpi)
+        else -> {
+            parameters["workId"] = workId
+            val answerId = query["answerid"] ?: query["workanswerid"]
+            val enc = query["enc"]
+            answerId?.let { parameters["answerId"] = it }
+            enc?.let { parameters["enc"] = it }
+            query["ut"]?.let { parameters["ut"] = it }
+            if (cpi != null && answerId != null && enc != null) "/mooc2/work/task"
+            else "/work/doHomeWorkNew"
+        }
     }
-    // 拿不到 workId 时至少打开这门课的电脑版作业列表，而不是继续用手机页。
-    if (courseId != null && classId != null) {
-        return "https://mooc1.chaoxing.com/mooc-ans/work/stu-work" +
-            "?courseId=${encode(courseId)}&classId=${encode(classId)}"
-    }
-    return null
+    return buildDesktopWorkUrl(target, parameters)
 }
+
+internal fun desktopAssessmentCourseFallback(url: String): String? {
+    if (assessmentPath(url)?.let(::isDesktopAssessmentPath) != true) return null
+    val query = parseQuery(url.substringAfter('?', "").substringBefore('#'))
+    val courseId = query["courseid"] ?: return null
+    val classId = query["classid"] ?: query["clazzid"] ?: return null
+    return desktopCourseUrl(courseId, classId, query["cpi"])
+}
+
+private fun desktopCourseUrl(courseId: String, classId: String, cpi: String?): String =
+    "https://mooc1.chaoxing.com$DESKTOP_COURSE_PATH?courseid=${encode(courseId)}" +
+        "&clazzid=${encode(classId)}&cpi=${encode(cpi ?: "0")}&vc=1&ismooc2=1&v=2"
+
+private fun buildDesktopWorkUrl(path: String, parameters: Map<String, String>): String =
+    "$DESKTOP_WORK_BASE$path?" + parameters.entries.joinToString("&") { (key, value) ->
+        "$key=${encode(value)}"
+    }
+
+internal fun isDesktopAssessmentUrl(url: String): Boolean =
+    assessmentPath(url)?.let(::isDesktopAssessmentPath) == true || isDesktopAssessmentCourseUrl(url)
+
+internal fun isDesktopAssessmentCourseUrl(url: String): Boolean = when (assessmentPath(url)) {
+    DESKTOP_COURSE_PATH, "/mooc2-ans/mycourse/studentcourse", "/mooc-ans/mycourse/studentcourse" -> true
+    else -> false
+}
+
+private fun isDesktopAssessmentPath(path: String): Boolean =
+    path.startsWith("/mooc-ans/mooc2/work/") || path.startsWith("/mooc2/work/") ||
+        path == "/mooc-ans/work/dohomeworknew" || path == "/mooc-ans/work/stu-work"
+
+internal fun isMobileHomeworkUrl(url: String): Boolean {
+    val path = assessmentPath(url)?.removePrefix("/mooc-ans") ?: return false
+    return path.startsWith("/work/phone/") || path == "/work/task-list" ||
+        path == "/phone/moocanalysis/worklist"
+}
+
+private fun assessmentPath(url: String): String? = runCatching {
+    // 部分列表链接的查询参数含有未转义的标题，只解析主机和路径。
+    val address = url.substringBefore('#').substringBefore('?')
+    val https = address.replaceFirst(Regex("^http://", RegexOption.IGNORE_CASE), "https://")
+    if (!isAllowedAssessmentUrl(https)) return null
+    URI(https).path.lowercase(Locale.ROOT).trimEnd('/')
+}.getOrNull()
+
+/** 只接受 https 且主机名为 chaoxing.com 或其子域名。 */
+internal fun isAllowedAssessmentUrl(url: String): Boolean = runCatching {
+    val uri = URI(url)
+    val host = uri.host?.lowercase(Locale.ROOT) ?: return false
+    uri.scheme.equals("https", ignoreCase = true) &&
+        (host == "chaoxing.com" || host.endsWith(".chaoxing.com"))
+}.getOrDefault(false)
 
 private fun encode(value: String): String =
     runCatching { URLEncoder.encode(value, "UTF-8") }.getOrDefault(value)
@@ -50,8 +103,9 @@ private fun parseQuery(rawQuery: String?): Map<String, String> {
     return rawQuery.split('&').mapNotNull { pair ->
         val index = pair.indexOf('=')
         if (index <= 0) return@mapNotNull null
-        val key = pair.substring(0, index).lowercase()
+        val key = pair.substring(0, index).lowercase(Locale.ROOT)
         val value = pair.substring(index + 1)
-        key to runCatching { URLDecoder.decode(value, "UTF-8") }.getOrDefault(value)
+        val decoded = runCatching { URLDecoder.decode(value, "UTF-8") }.getOrDefault(value)
+        decoded.takeIf { it.isNotBlank() }?.let { key to it }
     }.toMap()
 }

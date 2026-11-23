@@ -95,6 +95,8 @@ struct MacCourseStudyView: View {
 
                 Spacer()
 
+                AppUpdateButton()
+
                 if appState.selectedTab == .study {
                     if appState.isBatchWatching {
                         Button {

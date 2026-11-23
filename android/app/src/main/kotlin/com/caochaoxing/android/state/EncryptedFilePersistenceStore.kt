@@ -249,7 +249,7 @@ class EncryptedFilePersistenceStore internal constructor(
             return File(appContext.filesDir, STATE_DIR_NAME)
         }
 
-        private fun getOrCreateKeyStoreSecretKey(alias: String): SecretKey {
+        internal fun getOrCreateKeyStoreSecretKey(alias: String): SecretKey {
             val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
             if (keyStore.containsAlias(alias)) {
                 val existing = keyStore.getKey(alias, null) as? SecretKey

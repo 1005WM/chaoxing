@@ -9,6 +9,7 @@ import android.annotation.SuppressLint
 import android.widget.Toast
 import android.graphics.Bitmap
 import android.os.Message
+import android.view.View
 import android.webkit.CookieManager
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -37,6 +38,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -45,6 +47,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,7 +60,6 @@ import com.caochaoxing.android.state.AssessmentPageExporter
 import com.caochaoxing.android.ui.theme.CxPalette
 import com.caochaoxing.android.ui.theme.CxTypography
 import com.caochaoxing.core.model.ChaoxingStoredCookie
-import java.net.URI
 
 /**
  * 只实现跳转相关的桥接通知：打开网页、退出页面。
@@ -91,11 +93,39 @@ private const val DESKTOP_USER_AGENT =
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
         "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
+private const val OPEN_COURSE_HOMEWORK_JS = """
+(function() {
+  var tab = document.querySelector('[title="作业"][data-url], [aria-label="作业"][data-url]');
+  if (!tab) return false;
+  tab.click();
+  return true;
+})();
+"""
+
+// 只解除有内容溢出的根节点滚动限制。带 iframe 的课程页可能在子页面中加载作业。
+private const val CHECK_DESKTOP_LAYOUT_JS = """
+(function() {
+  var root = document.documentElement;
+  var body = document.body;
+  if (!root || !body || document.readyState !== 'complete') return false;
+  function clipsScroll(element) {
+    var overflow = getComputedStyle(element).overflowY;
+    return overflow === 'hidden' || overflow === 'clip';
+  }
+  if (Math.max(root.scrollHeight, body.scrollHeight) > window.innerHeight + 1) {
+    if (clipsScroll(root)) root.style.setProperty('overflow-y', 'auto', 'important');
+    if (clipsScroll(body)) body.style.setProperty('overflow-y', 'visible', 'important');
+  }
+  if (body.innerText.trim()) return false;
+  return !Array.from(body.querySelectorAll('iframe, frame, embed, object, canvas, video, input, button, a, [aria-busy="true"]'))
+    .some(function(element) { return element.getClientRects().length > 0; });
+})();
+"""
+
 /**
  * 用当前账号的 Cookie 在应用内打开作业 / 考试网页。
  *
- * 默认加载电脑版（宽视口 + 桌面 UA），可一键切回手机版；只展示页面，
- * 不注入脚本、不调用提交/开始接口。只允许 https 的 `*.chaoxing.com`。
+ * 电脑版使用桌面 UA 和宽视口。只有提供了手机链接时才可切换版本。
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -108,16 +138,46 @@ fun AssessmentWebScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val hasMobileVariant = !mobileUrl.isNullOrBlank() && mobileUrl != url
-    var desktopMode by remember(url) { mutableStateOf(hasMobileVariant) }
+    val hasMobileVariant = !mobileUrl.isNullOrBlank() && mobileUrl != url && !isDesktopAssessmentUrl(mobileUrl)
+    var desktopMode by remember(url) { mutableStateOf(isDesktopAssessmentUrl(url)) }
+    val currentDesktopMode by rememberUpdatedState(desktopMode)
+    val currentDesktopCourseFallback by rememberUpdatedState(remember(url) { desktopAssessmentCourseFallback(url) })
+    var triedDesktopCourse by remember(url) { mutableStateOf(false) }
+    var openedHomeworkTab by remember(url) { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var redirectedToMobile by remember { mutableStateOf(false) }
     var blocked by remember { mutableStateOf(false) }
     var canGoBack by remember { mutableStateOf(false) }
+    var clearHistoryOnPageFinish by remember { mutableStateOf(false) }
     var currentUrl by remember(url) { mutableStateOf(url) }
+    var showAi by remember { mutableStateOf(false) }
+    var aiQuestions by remember { mutableStateOf(emptyList<com.caochaoxing.core.service.AiQuestion>()) }
+    var aiPageUrl by remember { mutableStateOf(url) }
+    val aiController = com.caochaoxing.android.CaochaoxingApp.from(context).aiStudyController
 
     val popupViews = remember { mutableListOf<WebView>() }
     val consoleMessages = remember { mutableListOf<String>() }
+
+    fun tryDesktopCourse(view: WebView): Boolean {
+        val course = currentDesktopCourseFallback ?: return false
+        if (triedDesktopCourse) return false
+        triedDesktopCourse = true
+        view.post {
+            if (view.isAttachedToWindow && currentDesktopMode && triedDesktopCourse) view.loadUrl(course)
+        }
+        return true
+    }
+
+    fun blockNavigation(view: WebView, target: String): Boolean {
+        if (!currentDesktopMode || !isMobileHomeworkUrl(target)) return !isAllowedAssessmentUrl(target)
+        if (!tryDesktopCourse(view)) {
+            redirectedToMobile = true
+            isLoading = false
+        }
+        return true
+    }
+
     val webView = remember {
         WebView(context).apply {
             settings.apply {
@@ -158,7 +218,7 @@ fun AssessmentWebScreen(
                                 request: WebResourceRequest,
                             ): Boolean {
                                 val target = request.url?.toString().orEmpty()
-                                if (target.isNotBlank()) {
+                                if (request.isForMainFrame && !blockNavigation(main, target)) {
                                     main.loadUrl(target)
                                 }
                                 return true
@@ -172,7 +232,13 @@ fun AssessmentWebScreen(
                 }
             }
             webViewClient = object : WebViewClient() {
+                private var navigationVersion = 0
+
+                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
+                    request.isForMainFrame && blockNavigation(view, request.url.toString())
+
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                    navigationVersion++
                     isLoading = true
                     errorMessage = null
                     if (!url.isNullOrBlank()) currentUrl = url
@@ -180,11 +246,37 @@ fun AssessmentWebScreen(
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     isLoading = false
+                    if (clearHistoryOnPageFinish) {
+                        view?.clearHistory()
+                        clearHistoryOnPageFinish = false
+                    }
                     canGoBack = view?.canGoBack() == true
                     if (!url.isNullOrBlank()) currentUrl = url
                     // 学习通 H5 / 电脑版页面靠 jsBridge 的 CLIENT_OPEN_URL 跳转；官方 App 之外
                     // 这个调用会被丢弃，点条目没反应。这里只补一个「收到打开请求就跳转」的兼容层。
                     view?.evaluateJavascript(BRIDGE_COMPAT_JS, null)
+                    if (view == null || url == null || !currentDesktopMode || !isDesktopAssessmentUrl(url)) return
+                    val version = navigationVersion
+                    fun isCurrentPage(): Boolean = currentDesktopMode && view.isAttachedToWindow &&
+                        version == navigationVersion && view.url == url && errorMessage == null
+
+                    if (!openedHomeworkTab && isDesktopAssessmentCourseUrl(url)) {
+                        view.evaluateJavascript(OPEN_COURSE_HOMEWORK_JS) { opened ->
+                            if (opened == "true") openedHomeworkTab = true
+                        }
+                    }
+                    view.evaluateJavascript(CHECK_DESKTOP_LAYOUT_JS) { empty ->
+                        if (empty != "true" || !isCurrentPage()) return@evaluateJavascript
+                        view.postDelayed({
+                            if (isCurrentPage()) {
+                                view.evaluateJavascript(CHECK_DESKTOP_LAYOUT_JS) { stillEmpty ->
+                                    if (stillEmpty == "true" && isCurrentPage() && !tryDesktopCourse(view)) {
+                                        errorMessage = "学习通电脑版没有返回作业内容。"
+                                    }
+                                }
+                            }
+                        }, 1200)
+                    }
                 }
 
                 override fun onReceivedError(
@@ -228,18 +320,27 @@ fun AssessmentWebScreen(
 
     LaunchedEffect(url, mobileUrl, desktopMode) {
         val target = if (desktopMode) url else (mobileUrl ?: url)
+        triedDesktopCourse = false
+        openedHomeworkTab = false
+        redirectedToMobile = false
         if (!isAllowedAssessmentUrl(target)) {
             blocked = true
             isLoading = false
             return@LaunchedEffect
         }
         blocked = false
+        webView.stopLoading()
+        clearHistoryOnPageFinish = true
+        canGoBack = false
+        currentUrl = target
         applyMode(desktopMode)
         injectChaoxingCookies(appState, target)
         webView.loadUrl(target)
     }
 
-    BackHandler(enabled = canGoBack) {
+    if (showAi) AiDraftSheet(aiPageUrl, title, aiQuestions) { showAi = false }
+
+    BackHandler(enabled = canGoBack && !showAi) {
         if (webView.canGoBack()) {
             webView.goBack()
         } else {
@@ -262,7 +363,7 @@ fun AssessmentWebScreen(
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            text = (if (desktopMode) "电脑版 · " else "手机版 · ") +
+                            text = (if (desktopMode) "电脑版  " else "手机版  ") +
                                 currentUrl.substringAfter("://", currentUrl).substringBefore("?"),
                             style = MaterialTheme.typography.labelSmall,
                             color = CxPalette.inkTertiary,
@@ -281,6 +382,17 @@ fun AssessmentWebScreen(
                     }
                 },
                 actions = {
+                    TextButton(onClick = {
+                        val page = webView.url ?: return@TextButton
+                        if (!isAllowedAssessmentUrl(page)) return@TextButton
+                        webView.evaluateJavascript(com.caochaoxing.android.state.EXTRACT_AI_QUESTIONS) { raw ->
+                            if (webView.url == page) {
+                                aiQuestions = runCatching { aiController.decodeQuestions(raw) }.getOrDefault(emptyList())
+                                aiPageUrl = page
+                                showAi = true
+                            }
+                        }
+                    }, enabled = !isLoading && !blocked) { Text("AI 作答") }
                     if (hasMobileVariant) {
                         IconButton(onClick = { desktopMode = !desktopMode }) {
                             Icon(
@@ -318,7 +430,20 @@ fun AssessmentWebScreen(
                             tint = CxPalette.inkTertiary,
                         )
                     }
-                    IconButton(onClick = { if (!blocked) webView.reload() }, enabled = !blocked) {
+                    IconButton(
+                        onClick = {
+                            if (redirectedToMobile || errorMessage != null) {
+                                triedDesktopCourse = false
+                                openedHomeworkTab = false
+                                redirectedToMobile = false
+                                errorMessage = null
+                                webView.loadUrl(if (desktopMode) url else (mobileUrl ?: url))
+                            } else {
+                                webView.reload()
+                            }
+                        },
+                        enabled = !blocked,
+                    ) {
                         Icon(Icons.Rounded.Refresh, contentDescription = "刷新", tint = CxPalette.accent)
                     }
                 },
@@ -330,19 +455,27 @@ fun AssessmentWebScreen(
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
             Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+                if (!blocked) {
+                    AndroidView(
+                        factory = { webView },
+                        modifier = Modifier.fillMaxSize(),
+                        update = { it.visibility = if (redirectedToMobile || errorMessage != null) View.INVISIBLE else View.VISIBLE },
+                    )
+                }
                 when {
                     blocked -> WebNotice(
                         title = "这个链接不在允许范围内",
                         detail = "只允许打开 https 的 chaoxing.com 页面，避免会话被带到外部站点。",
                     )
+                    redirectedToMobile -> WebNotice(
+                        title = "学习通返回了手机版",
+                        detail = if (hasMobileVariant) "可点右上角的手机图标打开手机版。" else "可在电脑浏览器中打开课程作业。",
+                    )
                     errorMessage != null -> WebNotice(
                         title = "网页加载失败",
                         detail = "$errorMessage\n可返回后重试，或先在网页版确认该作业是否还能打开。",
                     )
-                    else -> AndroidView(
-                        factory = { webView },
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                    else -> Unit
                 }
             }
             Text(
@@ -361,7 +494,7 @@ fun AssessmentWebScreen(
 @Composable
 private fun WebNotice(title: String, detail: String) {
     Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
+        modifier = Modifier.fillMaxSize().background(CxPalette.canvas).padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -375,16 +508,8 @@ private fun WebNotice(title: String, detail: String) {
     }
 }
 
-/** 只接受 https 且主机名为 chaoxing.com 或其子域名。 */
-internal fun isAllowedAssessmentUrl(url: String): Boolean = runCatching {
-    val uri = URI(url)
-    val host = uri.host?.lowercase() ?: return false
-    uri.scheme.equals("https", ignoreCase = true) &&
-        (host == "chaoxing.com" || host.endsWith(".chaoxing.com"))
-}.getOrDefault(false)
-
 /** 把当前账号的 Cookie 写进 WebView，使网页保持登录态。只写 chaoxing.com 域。 */
-private fun injectChaoxingCookies(appState: AndroidAppState, url: String) {
+internal fun injectChaoxingCookies(appState: AndroidAppState, url: String) {
     val cookies: List<ChaoxingStoredCookie> = appState.activeClient?.session?.cookies.orEmpty()
     if (cookies.isEmpty()) return
     val manager = CookieManager.getInstance()

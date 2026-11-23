@@ -3,8 +3,11 @@
 
 package com.caochaoxing.android
 
+import com.caochaoxing.android.ui.screens.desktopAssessmentCourseFallback
 import com.caochaoxing.android.ui.screens.desktopAssessmentUrl
 import com.caochaoxing.android.ui.screens.isAllowedAssessmentUrl
+import com.caochaoxing.android.ui.screens.isDesktopAssessmentUrl
+import com.caochaoxing.android.ui.screens.isMobileHomeworkUrl
 import com.caochaoxing.core.model.ChaoxingAssessmentItem
 import com.caochaoxing.core.model.ChaoxingAssessmentKind
 import org.junit.Assert.assertEquals
@@ -55,7 +58,7 @@ class AssessmentWebUrlTest {
     }
 
     @Test
-    fun missingWorkIdFallsBackToDesktopWorkList() {
+    fun missingWorkIdOpensDesktopCourse() {
         val item = ChaoxingAssessmentItem(
             kind = ChaoxingAssessmentKind.WORK,
             title = "作业",
@@ -65,9 +68,61 @@ class AssessmentWebUrlTest {
             taskUrl = "https://mooc1-api.chaoxing.com/work/phone/task-work?courseId=300001&classId=200001",
         )
         assertEquals(
-            "https://mooc1.chaoxing.com/mooc-ans/work/stu-work?courseId=300001&classId=200001",
-            desktopAssessmentUrl(item),
+            "https://mooc1.chaoxing.com/visit/stucoursemiddle?courseid=300001&clazzid=200001&cpi=7001&vc=1&ismooc2=1&v=2",
+            desktopAssessmentUrl(item, courseCpi = 7001),
         )
+    }
+
+    @Test
+    fun desktopLinksKeepServerParameters() {
+        val item = ChaoxingAssessmentItem(
+            kind = ChaoxingAssessmentKind.WORK,
+            title = "作业",
+            statusText = "做作业",
+            taskUrl = "http://mooc1-2.chaoxing.com/mooc-ans/mooc2/work/task" +
+                "?courseId=3&classId=2&cpi=7&workId=9&answerId=8&enc=a%2Bb&other=1",
+        )
+
+        val desktop = "https://mooc1-2.chaoxing.com/mooc-ans/mooc2/work/task" +
+            "?courseId=3&classId=2&cpi=7&workId=9&answerId=8&enc=a%2Bb&other=1"
+        assertEquals(desktop, desktopAssessmentUrl(item))
+        assertTrue(isDesktopAssessmentUrl(desktop))
+        val course = "https://mooc1.chaoxing.com/visit/stucoursemiddle?courseid=3&clazzid=2&cpi=7&vc=1&ismooc2=1&v=2"
+        assertEquals(course, desktopAssessmentCourseFallback(desktop))
+        assertEquals(course, desktopAssessmentCourseFallback(
+            "https://mooc1.chaoxing.com/mooc-ans/mooc2/work/list?courseId=3&classId=2&cpi=7",
+        ))
+        assertNull(desktopAssessmentCourseFallback(course))
+        assertTrue(isDesktopAssessmentUrl(course))
+    }
+
+    @Test
+    fun mobileLinksCarryCourseAndAnswerContextToDesktop() {
+        val work = ChaoxingAssessmentItem(
+            kind = ChaoxingAssessmentKind.WORK,
+            title = "作业",
+            statusText = "做作业",
+            taskUrl = "https://mooc1-api.chaoxing.com/work/phone/task-work" +
+                "?courseId=3&clazzId=2&cpi=7&workId=9&workAnswerId=8&enc=a%2Bb&ut=s",
+        )
+        val base = "https://mooc1.chaoxing.com/mooc-ans"
+        assertEquals(
+            "$base/mooc2/work/task?courseId=3&classId=2&cpi=7&workId=9&answerId=8&enc=a%2Bb&ut=s",
+            desktopAssessmentUrl(work, courseCpi = 999),
+        )
+        assertEquals(
+            "$base/work/doHomeWorkNew?courseId=3&classId=2&cpi=7&workId=9",
+            desktopAssessmentUrl(work.copy(taskUrl = work.taskUrl?.substringBefore("&workAnswerId"))),
+        )
+    }
+
+    @Test
+    fun detectsMobileHomeworkNavigationWithoutMatchingDesktopOrExams() {
+        val base = "https://mooc1.chaoxing.com"
+        assertTrue(isMobileHomeworkUrl("$base/mooc-ans/work/phone/doHomeWork?workId=1"))
+        assertTrue(isMobileHomeworkUrl("$base/phone/moocAnalysis/workList?courseId=1"))
+        assertFalse(isMobileHomeworkUrl("$base/mooc-ans/mooc2/work/task?workId=1"))
+        assertFalse(isMobileHomeworkUrl("$base/exam/phone/task-exam?examId=1"))
     }
 
     @Test

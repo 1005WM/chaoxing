@@ -107,7 +107,13 @@ class AuthorizedReadOnlyTest {
                 scenario.onActivity { activity ->
                     activity.setContent {
                         CaochaoxingTheme(darkTheme = true) {
-                            CourseListScreen(state, onCourseClick = {}, onActivityClick = {}, onManageAccounts = {})
+                            CourseListScreen(
+                                state,
+                                onCourseClick = {},
+                                onActivityClick = {},
+                                onManageAccounts = {},
+                                onOpenTodo = {},
+                            )
                         }
                     }
                 }

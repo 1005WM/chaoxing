@@ -15,14 +15,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AccountCircle
-import androidx.compose.material.icons.automirrored.rounded.Assignment
 import androidx.compose.material.icons.rounded.Bookmark
-import androidx.compose.material.icons.automirrored.rounded.Assignment
 import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material.icons.rounded.Clear
 import androidx.compose.material.icons.rounded.Gesture
@@ -39,14 +38,13 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -70,7 +68,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.caochaoxing.android.CaochaoxingApp
 import com.caochaoxing.android.state.AndroidAppState
-import com.caochaoxing.android.state.AssessmentOverviewState
 import com.caochaoxing.android.state.CourseStudyController
 import com.caochaoxing.android.ui.components.CxBadge
 import com.caochaoxing.android.ui.components.CxFlowRow
@@ -166,6 +163,7 @@ fun CourseListScreen(
                     titleContentColor = CxPalette.ink,
                 ),
                 actions = {
+                    AppUpdateButton()
                     uiState.activeAccount?.let { account ->
                         IconButton(onClick = onManageAccounts) {
                             Icon(
@@ -201,35 +199,36 @@ fun CourseListScreen(
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
             ) {
                 item(key = "course_title") {
-                    Column(
-                        modifier = Modifier.padding(bottom = 20.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        Text("我的课程", style = CxTypography.brandDisplay, color = CxPalette.ink)
-                        if (uiState.courses.isNotEmpty()) {
-                            val favorites = uiState.courses.count { it.courseId in uiState.starredCourseIds }
-                            val pending = overviewState?.totalPending ?: 0
-                            val count = buildString {
-                                append("共 ${uiState.courses.size} 门课程")
-                                if (favorites > 0) append(" · $favorites 门常用")
-                                if (pending > 0) append(" · $pending 项作业未完成")
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text("我的课程", style = CxTypography.brandDisplay, color = CxPalette.ink)
+                            if (uiState.courses.isNotEmpty()) {
+                                val favorites = uiState.courses.count { it.courseId in uiState.starredCourseIds }
+                                Text(
+                                    text = buildString {
+                                        append("共 ${uiState.courses.size} 门课程")
+                                        if (favorites > 0) append("，$favorites 门常用")
+                                    },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = CxPalette.inkSecondary,
+                                )
                             }
-                            Text(
-                                count,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = CxPalette.inkSecondary,
+                        }
+                        if (uiState.courses.isNotEmpty()) {
+                            val loadedOverview = overviewState?.takeIf { it.hasLoadedAny }
+                            PendingHomeworkEntry(
+                                count = loadedOverview?.pendingWorkCount,
+                                overdueCount = loadedOverview?.overdueWorkCount(System.currentTimeMillis()),
+                                onOpen = onOpenTodo,
                             )
                         }
-                    }
-                }
-
-                if (overviewState != null && (overviewState.totalPending > 0 || overviewState.errors.isNotEmpty())) {
-                    item(key = "assessment_todo_entry") {
-                        AssessmentTodoEntryCard(
-                            state = overviewState,
-                            onOpen = onOpenTodo,
-                            modifier = Modifier.padding(bottom = 14.dp),
-                        )
                     }
                 }
 
@@ -510,63 +509,37 @@ fun CourseListScreen(
     }
 }
 
-/**
- * 课程列表顶部的待办入口：汇总全部课程的未完成作业 / 考试，点开看明细（带科目名）。
- */
 @Composable
-private fun AssessmentTodoEntryCard(
-    state: AssessmentOverviewState,
+private fun PendingHomeworkEntry(
+    count: Int?,
+    overdueCount: Int?,
     onOpen: () -> Unit,
-    modifier: Modifier = Modifier,
 ) {
-    val subtitle = buildString {
-        if (state.pendingCourseCount > 0) {
-            append("涉及 ${state.pendingCourseCount} 门课程")
-        }
-        if (state.pendingExamCount > 0) {
-            if (isNotEmpty()) append(" · ")
-            append("其中考试 ${state.pendingExamCount} 项")
-        }
-        if (state.errors.isNotEmpty()) {
-            if (isNotEmpty()) append(" · ")
-            append("${state.errors.size} 门课程读取失败")
-        }
-    }
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(CxPalette.amber.copy(alpha = 0.12f))
-            .clickable(onClick = onOpen)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    Surface(
+        onClick = onOpen,
+        modifier = Modifier.widthIn(min = 104.dp, max = 148.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = CxPalette.amber.copy(alpha = 0.12f),
     ) {
-        CxIconTile(icon = Icons.AutoMirrored.Rounded.Assignment, tone = CxTone.AMBER, size = 34.dp)
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
             Text(
-                text = if (state.pendingWorkCount > 0) {
-                    "未完成作业 ${state.pendingWorkCount} 项"
-                } else {
-                    "待办 ${state.totalPending} 项"
-                },
-                style = CxTypography.headline,
+                text = "未完成的作业",
+                style = CxTypography.eyebrow,
                 color = CxPalette.ink,
             )
-            if (subtitle.isNotBlank()) {
-                Text(
-                    text = subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = CxPalette.inkSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+            Text(
+                text = count?.toString() ?: "—",
+                style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.SemiBold),
+                color = CxPalette.amber,
+            )
+            Text(
+                text = if (overdueCount == null) "逾期 —" else "逾期 $overdueCount 项",
+                style = CxTypography.eyebrow,
+                color = if ((overdueCount ?: 0) > 0) CxPalette.cinnabar else CxPalette.inkSecondary,
+            )
         }
-        Text(
-            text = "查看",
-            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-            color = CxPalette.amber,
-        )
     }
 }

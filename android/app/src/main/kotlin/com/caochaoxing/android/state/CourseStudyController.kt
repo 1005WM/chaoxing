@@ -283,6 +283,8 @@ class CourseStudyController(
     private val scope: CoroutineScope,
     private val dependencies: CourseStudyDependencies = LiveCourseStudyDependencies(),
 ) {
+    var onQuizDiscovered: ((com.caochaoxing.core.model.ChaoxingChapterAttachment, Boolean) -> Unit)? = null
+    var onWatchStopped: (() -> Unit)? = null
     constructor(
         appState: AndroidAppState,
         scope: CoroutineScope,
@@ -800,6 +802,8 @@ class CourseStudyController(
                                             }
 
                                             // 1. Enqueue unpassed videos/audios FIRST so workers begin immediately.
+                                            content.otherAttachments.filter { it.kind == com.caochaoxing.core.model.ChaoxingAttachmentKind.QUIZ }
+                                                .forEach { onQuizDiscovered?.invoke(it, false) }
                                             for (video in content.videos) {
                                                 if (!video.isPassed && video.isReportableTask && handledTaskIds.add(video.id)) {
                                                     queuedCountInPass.incrementAndGet()
@@ -943,6 +947,7 @@ class CourseStudyController(
     }
 
     fun stopWatch(logStopped: Boolean = true) {
+        onWatchStopped?.invoke()
         val wasRunning = watchJob?.isActive == true || _uiState.value.isWatching
         watchJob?.cancel()
         watchJob = null
@@ -1736,6 +1741,9 @@ class CourseStudyController(
                 },
             )
         }
+        _uiState.value.contentByChapterKey[chapterKey]?.otherAttachments.orEmpty()
+            .filter { it.kind == com.caochaoxing.core.model.ChaoxingAttachmentKind.QUIZ }
+            .forEach { onQuizDiscovered?.invoke(it, true) }
     }
 
     private fun markAttachmentPassed(

@@ -111,6 +111,7 @@ import com.caochaoxing.android.ui.screens.signers.SignWorkspaceScreen
 import com.caochaoxing.android.ui.theme.CaochaoxingTheme
 import com.caochaoxing.android.ui.theme.CxPalette
 import com.caochaoxing.android.ui.theme.CxTypography
+import com.caochaoxing.core.model.ChaoxingCourse
 import com.caochaoxing.core.model.ChaoxingSignActivity
 import com.caochaoxing.core.store.ChaoxingSnapshotJson
 import kotlinx.coroutines.delay
@@ -196,13 +197,15 @@ private object CxRoutes {
         }.getOrDefault("")
 }
 
-/** 作业优先打开电脑版作业页，考试保持原链接；两者都能在网页里再切换版本。 */
+/** 作业优先打开电脑版作业页，考试使用原链接。 */
 private fun openAssessmentPage(
     navController: androidx.navigation.NavHostController,
     item: com.caochaoxing.core.model.ChaoxingAssessmentItem,
+    courses: List<ChaoxingCourse>,
 ) {
     val raw = item.taskUrl?.takeIf { it.isNotBlank() }
-    val desktop = desktopAssessmentUrl(item)
+    val courseCpi = courses.firstOrNull { it.courseId == item.courseId && it.classId == item.classId }?.cpi
+    val desktop = desktopAssessmentUrl(item, courseCpi)
     when {
         desktop != null -> navController.navigate(CxRoutes.assessmentWeb(desktop, raw, item.title))
         raw != null -> navController.navigate(CxRoutes.assessmentWeb(raw, null, item.title))
@@ -617,7 +620,7 @@ private fun AuthenticatedMainContainer(
                 courseStudyController = courseStudyController,
                 initialSubTab = initialTab,
                 onOpenAssessmentPage = { item ->
-                    openAssessmentPage(navController, item)
+                    openAssessmentPage(navController, item, uiState.courses)
                 },
             )
         }
@@ -630,7 +633,7 @@ private fun AuthenticatedMainContainer(
                     navController.navigate(CxRoutes.courseDetail(course.id, tab = COURSE_SUBTAB_ASSESSMENT))
                 },
                 onOpenWeb = { item ->
-                    openAssessmentPage(navController, item)
+                    openAssessmentPage(navController, item, uiState.courses)
                 },
             )
         }

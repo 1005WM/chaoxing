@@ -196,6 +196,7 @@ fun SettingsScreen(
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            item(key = "settings_ai") { AiSettingsCard() }
             uiState.activeAccount?.let { account ->
                 item(key = "settings_account_header") {
                     CxSectionHeader(

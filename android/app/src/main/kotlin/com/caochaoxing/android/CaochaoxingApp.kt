@@ -22,6 +22,9 @@ import kotlinx.coroutines.launch
  * Application entry point initializing encrypted persistence and the global [AndroidAppState].
  */
 class CaochaoxingApp : Application() {
+    val updateManager by lazy { com.caochaoxing.android.state.AppUpdateManager(this, applicationScope) }
+    lateinit var aiStudyController: com.caochaoxing.android.state.AiStudyController
+        private set
     val applicationScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     lateinit var persistenceStore: EncryptedFilePersistenceStore
@@ -52,6 +55,9 @@ class CaochaoxingApp : Application() {
             appState = appState,
             scope = applicationScope,
         )
+        aiStudyController = com.caochaoxing.android.state.AiStudyController(this, appState, applicationScope)
+        courseStudyController.onQuizDiscovered = aiStudyController::enqueue
+        courseStudyController.onWatchStopped = aiStudyController::stopFollowing
         assessmentController = AssessmentController(
             appState = appState,
             scope = applicationScope,
@@ -65,6 +71,7 @@ class CaochaoxingApp : Application() {
                 .map { it.activePhoneNumber }
                 .distinctUntilChanged()
                 .collect { phone ->
+                    aiStudyController.onAccountChanged(phone)
                     courseStudyController.onAccountChanged(phone)
                     assessmentController.onAccountChanged(phone)
                     assessmentOverviewController.onAccountChanged(phone)

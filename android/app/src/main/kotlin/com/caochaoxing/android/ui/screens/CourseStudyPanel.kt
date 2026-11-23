@@ -56,6 +56,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -142,6 +144,7 @@ fun LazyListScope.courseStudyItems(
     }
 
     // 1. Legal Multi-Way Simultaneous Watch Control Card
+    item(key = "ai_follow_study") { AiFollowStudyCard() }
     item(key = "study_control_card") {
         StudyControlCard(
             course = course,
@@ -1029,6 +1032,10 @@ private fun AttachmentTaskRow(
     onComplete: () -> Unit,
     onOpenExternal: () -> Unit,
 ) {
+    var showAi by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    if (showAi) {
+        AiDraftSheet(attachment.externalUrl.orEmpty(), attachment.name, null) { showAi = false }
+    }
     val icon = when (attachment.kind) {
         ChaoxingAttachmentKind.DOCUMENT -> Icons.Rounded.Description
         ChaoxingAttachmentKind.QUIZ -> Icons.Rounded.Quiz
@@ -1071,6 +1078,9 @@ private fun AttachmentTaskRow(
             }
 
             when {
+                attachment.kind == ChaoxingAttachmentKind.QUIZ && !attachment.externalUrl.isNullOrBlank() -> {
+                    TextButton(onClick = { showAi = true }) { Text("AI 作答") }
+                }
                 attachment.isPassed -> CxBadge(text = "已标记完成", tone = CxTone.SAGE, icon = Icons.Rounded.Check)
                 attachment.canCompleteAsDocument -> {
                     CxSecondaryButton(

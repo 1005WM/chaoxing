@@ -820,6 +820,12 @@ object ChaoxingCourseStudyService {
             val externalUrl = property?.stringOnlyOrNull("url")
                 ?: property?.stringOnlyOrNull("href")
                 ?: property?.stringOnlyOrNull("link")
+                ?: if (kind == ChaoxingAttachmentKind.QUIZ) {
+                    property?.stringOrNumberString("workid")?.let { workId ->
+                        "https://mooc1-api.chaoxing.com/work/phone/task-work?courseId=$courseId&classId=$classId" +
+                            "&workId=$workId&knowledgeid=$chapterId&jobid=$jobid&cpi=$cpi&ut=s"
+                    }
+                } else null
             // Per Chaoxing `documentJob.js` (`checkJobFinish`): non-empty `jobid` with `job` absent/false means already finished.
             val effectiveOtherPassed = when {
                 rawPassedFlag != null -> rawPassedFlag

@@ -139,6 +139,7 @@ struct IOSCourseListView: View {
 
     @ToolbarContentBuilder
     private var accountSwitcherToolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarTrailing) { AppUpdateButton() }
         if let account = appState.activeAccount {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {

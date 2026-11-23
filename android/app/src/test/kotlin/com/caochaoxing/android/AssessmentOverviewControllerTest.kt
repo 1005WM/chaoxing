@@ -4,6 +4,7 @@
 package com.caochaoxing.android
 
 import com.caochaoxing.android.state.AssessmentOverviewController
+import com.caochaoxing.android.state.AssessmentOverviewState
 import com.caochaoxing.core.model.ChaoxingAccountSession
 import com.caochaoxing.core.model.ChaoxingAssessmentItem
 import com.caochaoxing.core.model.ChaoxingAssessmentKind
@@ -64,6 +65,30 @@ class AssessmentOverviewControllerTest {
             },
             fetchedAtMs = 1L,
         )
+
+    @Test
+    fun overdueCountIncludesExpiredAndLatePendingHomeworkOnly() {
+        val math = course(1L, "高等数学")
+        val pending = pendingWork(math, "作业")
+        val state = AssessmentOverviewState(
+            summaries = mapOf(
+                math.id to ChaoxingAssessmentSummary(
+                    works = listOf(
+                        pending.copy(statusText = "已过期"),
+                        pending.copy(deadlineAtMs = 99),
+                        pending.copy(deadlineAtMs = 100),
+                        pending.copy(deadlineAtMs = 101),
+                        pending.copy(statusText = "待批阅", deadlineAtMs = 99),
+                        pending.copy(statusText = "", deadlineAtMs = 99),
+                        pending,
+                    ),
+                    exams = listOf(pending.copy(kind = ChaoxingAssessmentKind.EXAM, statusText = "已过期")),
+                ),
+            ),
+        )
+
+        assertEquals(2, state.overdueWorkCount(nowMs = 100))
+    }
 
     @Test
     fun loadCachesPerCourseAndAggregatesPending() = runTest {

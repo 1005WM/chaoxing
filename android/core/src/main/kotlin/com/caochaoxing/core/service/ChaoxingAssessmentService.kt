@@ -70,6 +70,9 @@ object ChaoxingAssessmentService {
         val exam = examDeferred.await()
 
         if (work.isFailure && exam.isFailure) {
+            // A concurrent re-login can invalidate the other list request. Keep the actual login error visible.
+            listOfNotNull(work.exceptionOrNull(), exam.exceptionOrNull())
+                .firstOrNull { it is ChaoxingError.LoginFailed }?.let { throw it }
             throw work.exceptionOrNull() ?: exam.exceptionOrNull()
                 ?: ChaoxingError.ParseFailed("作业与考试列表均加载失败")
         }

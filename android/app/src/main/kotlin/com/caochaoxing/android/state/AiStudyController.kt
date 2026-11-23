@@ -1,0 +1,185 @@
+package com.caochaoxing.android.state
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import com.caochaoxing.core.model.ChaoxingChapterAttachment
+import com.caochaoxing.core.service.*
+import com.caochaoxing.android.ui.screens.isAllowedAssessmentUrl
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+
+@Serializable
+data class AiConfig(val url: String = "", val key: String = "", val model: String = "", val followStudy: Boolean = false)
+
+data class AiDraft(val title: String, val questions: List<AiQuestion> = emptyList(), val answers: Map<String, AiAnswer> = emptyMap(),
+    val errors: Map<String, String> = emptyMap(), val running: Boolean = false, val message: String = "")
+
+/** Rendered questions only. No answer inputs, scripts, credentials or hidden fields are sent to AI. */
+internal const val EXTRACT_AI_QUESTIONS = """
+(function(){
+ var result=[];
+ function scan(doc){
+   var nodes=Array.from(doc.querySelectorAll('.TiMu, .questionLi, .question-item, .questionItem'));
+   nodes.forEach(function(node){
+     if(node.parentElement && node.parentElement.closest('.TiMu, .questionLi, .question-item, .questionItem')) return;
+     var title=node.querySelector('.Zy_TItle, .mark_name, .question-title, .questionTitle, h3');
+     if(!title) return;
+     var text=title.innerText.trim(); if(!text) return;
+     var choices=Array.from(node.querySelectorAll('.Zy_ulTop li, .answerList li, .question-options li, .answerBg li'));
+     if(!choices.length) choices=Array.from(node.querySelectorAll('label'));
+     var options=choices.map(function(e){return e.innerText.trim().replace(/^[A-Z][.、．\s]+/, '');}).filter(Boolean);
+     var type=/多选/.test(text)?'多选':/单选/.test(text)?'单选':/判断/.test(text)?'判断':'文字题';
+     result.push({id:String(result.length),type:type,text:text.slice(0,8000),options:options.slice(0,26),hasImage:!!title.querySelector('img,svg,canvas') || choices.some(function(e){return !!e.querySelector('img,svg,canvas');})});
+   });
+   Array.from(doc.querySelectorAll('iframe')).forEach(function(frame){try{if(frame.contentDocument)scan(frame.contentDocument);}catch(e){}});
+ }
+ scan(document); return JSON.stringify(result.slice(0,100));
+})();
+"""
+
+class AiStudyController(private val context: Context, private val appState: AndroidAppState, private val scope: CoroutineScope) {
+    private val json = Json { ignoreUnknownKeys = true }
+    private val preferences = context.getSharedPreferences("ai-settings", Context.MODE_PRIVATE)
+    private val _config = MutableStateFlow(AiConfig())
+    val config = _config.asStateFlow()
+    private val _drafts = MutableStateFlow<Map<String, AiDraft>>(emptyMap())
+    val drafts = _drafts.asStateFlow()
+    val api = AiAnswerService()
+    private val jobs = mutableMapOf<String, Job>()
+    private val automatic = mutableSetOf<String>()
+    private val mutex = Mutex()
+    private var account: String? = null
+    var loadError: String? = null
+        private set
+
+    init {
+        try {
+            preferences.getString("config", null)?.let {
+                val bytes = android.util.Base64.decode(it, android.util.Base64.NO_WRAP)
+                _config.value = json.decodeFromString(String(AesGcmCipher.decrypt(bytes, key()), Charsets.UTF_8))
+            }
+        } catch (_: Exception) { loadError = "AI 配置读取失败，请重新填写并保存" }
+    }
+
+    private fun key() = EncryptedFilePersistenceStore.getOrCreateKeyStoreSecretKey("com.caochaoxing.ai.v1")
+
+    fun save(config: AiConfig) {
+        val bytes = AesGcmCipher.encrypt(json.encodeToString(config).toByteArray(Charsets.UTF_8), key())
+        check(preferences.edit().putString("config", android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)).commit()) {
+            "AI 设置保存失败"
+        }
+        _config.value = config
+        loadError = null
+    }
+
+    fun onAccountChanged(phone: String?) {
+        if (account == phone) return
+        account = phone
+        jobs.values.toList().forEach { it.cancel() }
+        jobs.clear()
+        automatic.clear()
+        _drafts.value = emptyMap()
+    }
+
+    fun stopFollowing() {
+        automatic.toList().forEach { jobs[it]?.cancel() }
+        automatic.clear()
+    }
+
+    fun enqueue(attachment: ChaoxingChapterAttachment, retryAfterVideo: Boolean = false) {
+        if (!_config.value.followStudy || attachment.isPassed || !attachment.isJob) return
+        val url = attachment.externalUrl ?: return
+        if (!isAllowedAssessmentUrl(url)) return
+        val existing = _drafts.value[url]
+        if (existing != null && !(retryAfterVideo && !existing.running && existing.questions.isEmpty())) return
+        generate(url, attachment.name, automaticRequest = true)
+    }
+
+    fun decodeQuestions(raw: String): List<AiQuestion> {
+        val encoded = json.decodeFromString<String>(raw)
+        return json.decodeFromString<List<AiQuestion>>(encoded).filter { it.text.isNotBlank() }.take(100)
+    }
+
+    fun generate(id: String, title: String, questions: List<AiQuestion>? = null, automaticRequest: Boolean = false, retryId: String? = null) {
+        if (jobs[id]?.isActive == true) return
+        val config = _config.value
+        if (config.url.isBlank() || config.key.isBlank() || config.model.isBlank()) {
+            _drafts.value = _drafts.value + (id to AiDraft(title, message = "请先配置 AI 接口、Key 和模型"))
+            return
+        }
+        if (automaticRequest) automatic += id
+        val phone = account
+        jobs[id] = scope.launch {
+            try {
+                val old = _drafts.value[id]
+                _drafts.value = _drafts.value + (id to (old ?: AiDraft(title)).copy(running = true, message = "等待生成"))
+                mutex.withLock {
+                    val list = questions ?: readQuestions(id)
+                    require(list.isNotEmpty()) { "未识别到题目。请打开题目页后重试，锁定测验需先完成前置学习" }
+                    var draft = (old?.takeIf { it.questions == list } ?: AiDraft(title, list)).copy(running = true, message = "正在生成")
+                    _drafts.value = _drafts.value + (id to draft)
+                    for (question in list) {
+                        ensureActive()
+                        if (retryId != null && question.id != retryId) continue
+                        if (retryId == null && question.id in draft.answers) continue
+                        try {
+                            val answer = api.answer(config.url, config.key, config.model, question)
+                            ensureActive()
+                            draft = draft.copy(answers = draft.answers + (question.id to answer), errors = draft.errors - question.id)
+                        } catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { draft = draft.copy(errors = draft.errors + (question.id to (e.message ?: "生成失败"))) }
+                        if (phone != account) return@withLock
+                        _drafts.value = _drafts.value + (id to draft)
+                    }
+                    _drafts.value = _drafts.value + (id to draft.copy(running = false, message = "生成结束"))
+                }
+            } catch (e: CancellationException) {
+                if (phone == account) _drafts.value[id]?.let { _drafts.value = _drafts.value + (id to it.copy(running = false, message = "已停止")) }
+                throw e
+            } catch (e: Exception) {
+                if (phone == account) _drafts.value = _drafts.value + (id to (_drafts.value[id] ?: AiDraft(title)).copy(running = false, message = e.message ?: "生成失败"))
+            } finally { automatic.remove(id) }
+        }
+    }
+
+    fun cancel(id: String) { jobs[id]?.cancel() }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private suspend fun readQuestions(url: String): List<AiQuestion> {
+        require(isAllowedAssessmentUrl(url)) { "测验地址无效" }
+        val result = CompletableDeferred<List<AiQuestion>>()
+        val view = WebView(context).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.allowFileAccess = false
+            settings.allowContentAccess = false
+            settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(view: WebView, request: android.webkit.WebResourceRequest): Boolean =
+                    !isAllowedAssessmentUrl(request.url.toString())
+            }
+        }
+        try {
+            com.caochaoxing.android.ui.screens.injectChaoxingCookies(appState, url)
+            view.loadUrl(url)
+            return withTimeoutOrNull(20_000) {
+                while (true) {
+                    delay(750)
+                    view.evaluateJavascript(EXTRACT_AI_QUESTIONS) { raw ->
+                        runCatching { decodeQuestions(raw) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { result.complete(it) }
+                    }
+                    if (result.isCompleted) return@withTimeoutOrNull result.await()
+                }
+                @Suppress("UNREACHABLE_CODE") emptyList()
+            } ?: error("未识别到题目。锁定测验需完成前置学习，或在题目网页中使用 AI 作答")
+        } finally { view.stopLoading(); view.destroy() }
+    }
+}
