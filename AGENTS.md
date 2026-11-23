@@ -2,6 +2,7 @@
 
 - `android/core` 包含 Kotlin 模型、网络协议、AI 服务、版本比较和更新源解析。
 - `android/app` 包含 Compose 界面、状态控制器、加密存储、APK 下载及系统安装入口。
+- `android/app/src/main/kotlin/com/caochaoxing/android/state/AiQuestion*` 包含题目页面读取、公式及题图处理、单题截图。`ui/screens/AiQuestionPreview.kt` 显示识别内容。
 - `Sources/ChaoxingCore` 包含 Apple 两端共用的协议、模型、设计组件和更新检查。
 - `Sources/CaochaoxingIOS` 和 `Sources/CaochaoxingMac` 分别包含 iOS 和 macOS 界面。
 - `Tests` 和各 Android 模块的 `src/test`、`src/androidTest` 包含测试。

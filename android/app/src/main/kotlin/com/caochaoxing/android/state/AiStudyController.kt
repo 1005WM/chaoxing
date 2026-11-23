@@ -21,47 +21,19 @@ data class AiDraft(val title: String, val questions: List<AiQuestion> = emptyLis
     val errors: Map<String, String> = emptyMap(), val running: Boolean = false, val message: String = "")
 
 /** Rendered questions only. No answer inputs, scripts, credentials or hidden fields are sent to AI. */
-internal const val EXTRACT_AI_QUESTIONS = """
+internal val EXTRACT_AI_QUESTIONS = """
 (function(){
  var result=[];
- var excluded='script,style,noscript,textarea,button,input,iframe,[hidden],[aria-hidden="true"],.mark_answer,.answer-analysis,.analysis,.correctAnswer,.teacherComment,[contenteditable="true"]';
- function questionText(node,doc,nodes){
-   var copy=node.cloneNode(true);
-   var originals=Array.from(node.querySelectorAll('*')), clones=Array.from(copy.querySelectorAll('*'));
-   originals.forEach(function(e,index){
-     var style=doc.defaultView.getComputedStyle(e);
-     if(style.display==='none' || style.visibility==='hidden' || nodes.indexOf(e)>=0) clones[index].remove();
-   });
-   Array.from(copy.querySelectorAll(excluded)).forEach(function(e){e.remove();});
-   Array.from(copy.querySelectorAll('br')).forEach(function(e){e.replaceWith(doc.createTextNode('\n'));});
-   Array.from(copy.querySelectorAll('p,div,h1,h2,h3,h4,li,tr')).forEach(function(e){e.appendChild(doc.createTextNode('\n'));});
-   return (copy.textContent || '').replace(/[ \t]+/g,' ').replace(/\n\s*\n/g,'\n').trim();
- }
- function picture(element, doc){
-   if(element.tagName.toLowerCase()==='canvas') {
-     try { return element.toDataURL('image/png'); } catch(e) { return ''; }
-   }
-   var lazy=element.getAttribute('data-original') || element.getAttribute('data-src');
-   var raw=lazy || element.currentSrc || element.getAttribute('src') || '';
-   var source=''; try { source=new URL(raw,doc.baseURI).href; } catch(e) {}
-   if(element.complete && element.naturalWidth>0 && (!lazy || source===element.currentSrc)) {
-     try {
-       var scale=Math.min(1,2048/Math.max(element.naturalWidth,element.naturalHeight));
-       var canvas=doc.createElement('canvas');
-       canvas.width=Math.max(1,Math.round(element.naturalWidth*scale));
-       canvas.height=Math.max(1,Math.round(element.naturalHeight*scale));
-       var context=canvas.getContext('2d'); context.fillStyle='white'; context.fillRect(0,0,canvas.width,canvas.height);
-       context.drawImage(element,0,0,canvas.width,canvas.height);
-       return canvas.toDataURL('image/jpeg',0.92);
-     } catch(e) {}
-   }
-   return source;
- }
+ var captureMedia=true;
+ var mediaBytes=0;
+ window.__cxAiQuestionNodes={};
+ var excluded='script:not([type^="math/tex"]),style,noscript,textarea,button,input,iframe,[hidden],.mark_answer,.answer-analysis,.analysis,.correctAnswer,.teacherComment,[contenteditable="true"]';
+ // AI_DOM_MEDIA
  function scan(doc){
    var strong='.singleQuesId,.questionLi[data],[data-question-id]';
    var generic='.TiMu,.questionLi,.question-item,.questionItem';
    var headings='.Zy_TItle,.mark_name,.question-title,.questionTitle';
-   var types='input[name^="type"],input[id^="type"]';
+   var types='input[name^="type"],input[id^="type"],input[id^="answertype"]';
    var nodes=Array.from(doc.querySelectorAll(strong));
    nodes=nodes.filter(function(e){return !e.querySelector(strong);});
    Array.from(doc.querySelectorAll(generic)).forEach(function(e){
@@ -84,25 +56,38 @@ internal const val EXTRACT_AI_QUESTIONS = """
    nodes.forEach(function(node){
      function owned(e){return !nodes.some(function(other){return other!==node && node.contains(other) && other.contains(e);});}
      var title=Array.from(node.querySelectorAll(headings+',h3')).find(owned) || node;
-     var text=questionText(node,doc,nodes);
-     var choices=Array.from(node.querySelectorAll('.Zy_ulTop li, .answerList li, .question-options li, .answerBg li, ul.mark_letter > li.workTextWrap, .mark_letter > li, .answerBg'));
+     var labels=new Map();
+     var choices=Array.from(node.querySelectorAll('.Zy_ulTop li, .answerList li, .question-options li, .answerBg li, ul.mark_letter > li.workTextWrap, .mark_letter > li, .answerBg, .Zy_ulTk .answer_p, .Zy_ulTk .after'));
      choices=choices.filter(owned);
-     choices=choices.filter(function(e){return !e.querySelector('.answerBg, .answerBg li, .mark_letter > li, .Zy_ulTop li');});
+     choices=choices.filter(function(e){return !choices.some(function(other){return other!==e && e.contains(other);});});
      if(!choices.length) choices=Array.from(node.querySelectorAll('label')).filter(owned);
      choices=choices.filter(function(e){return e.innerText.trim() || e.querySelector('img,svg,canvas');});
-     var options=choices.map(function(e){return e.innerText.trim().replace(/^[A-Z][.、．\s]+/, '') || '图片选项';});
      var images=[];
-     var stemImages=Array.from(node.querySelectorAll('img,canvas')).filter(function(e){
-       return owned(e) && !choices.some(function(choice){return choice.contains(e);}) && !e.closest(excluded);
+     function visuals(root){return Array.from(root.querySelectorAll('img,svg,canvas')).filter(function(e){
+       if(!owned(e) || e.closest(excluded) || e.parentElement.closest('svg,canvas')) return false;
+       for(var f=e;f && f!==node;f=f.parentElement) if(formula(f)) return false;
+       return true;
+     });}
+     var stemImages=visuals(node).filter(function(e){return !choices.some(function(c){return c.contains(e);});});
+     function add(e,label){labels.set(e,label);var source=mediaBytes>=24000000?'cx-capture:budget':picture(e,doc);mediaBytes+=source.length;images.push({label:label,source:source});}
+     stemImages.forEach(function(e,index){add(e,'题干图片 '+(index+1));});
+     choices.forEach(function(choice,index){visuals(choice).forEach(function(e,n){add(e,'选项 '+String.fromCharCode(65+index)+' 图片 '+(n+1));});});
+     var text=questionText(node,doc,nodes,labels);
+     var options=choices.map(function(e){return questionText(e,doc,[],labels).replace(/^[A-Z][.、．\s]+/, '') || '图片选项';});
+     var hasImage=images.length>0;
+     var needsScreenshot=images.length>6 || images.some(function(i){return !i.source || !/^data:image\/(png|jpeg|svg\+xml);base64,/.test(i.source);});
+     [node].concat(Array.from(node.querySelectorAll('*'))).filter(owned).forEach(function(e){
+       if(e.closest(excluded))return;
+       var style=doc.defaultView.getComputedStyle(e);
+       if(style.display==='none' || style.visibility==='hidden')return;
+       if(style.backgroundImage!=='none' || /font-cxsecret/.test(style.fontFamily)) needsScreenshot=true;
+       if(e.matches('math,mjx-container,.MathJax,[role="math"]') && !formula(e))needsScreenshot=true;
+       ['::before','::after'].forEach(function(p){var pseudo=doc.defaultView.getComputedStyle(e,p);if(pseudo.backgroundImage!=='none' || (pseudo.content && !/^(none|normal|"")$/.test(pseudo.content)))needsScreenshot=true;});
      });
-     stemImages.forEach(function(e,index){images.push({label:'题干图片 '+(index+1),source:picture(e,doc)});});
-     choices.forEach(function(choice,index){Array.from(choice.querySelectorAll('img,canvas')).forEach(function(e,n){
-       images.push({label:'选项 '+String.fromCharCode(65+index)+' 图片 '+(n+1),source:picture(e,doc)});
-     });});
-     var hasImage=images.length>0 || !!title.querySelector('svg') || choices.some(function(e){return !!e.querySelector('svg');});
+     hasImage=hasImage || needsScreenshot;
      if(!text && !hasImage) return;
      if(!text) text='图片题';
-     var typeNode=Array.from(node.querySelectorAll('input[name^="type"],input[id^="type"],.question-type,.type_tit,.mark_type')).find(owned);
+     var typeNode=Array.from(node.querySelectorAll(types+',.question-type,.type_tit,.mark_type')).find(owned);
      var typeValue=typeNode && typeNode.value;
      var typeText=(typeNode && typeNode.innerText || '')+' '+title.innerText;
      var type=typeValue==='3' || /判断/.test(typeText)?'判断':typeValue==='1' || /多选/.test(typeText)?'多选':typeValue==='0' || /单选/.test(typeText)?'单选':'文字题';
@@ -111,13 +96,16 @@ internal const val EXTRACT_AI_QUESTIONS = """
      if(type==='文字题' && !options.length && !hasImage &&
        !node.querySelector('.Zy_TItle,.mark_name,.question-title,.questionTitle,.stem,.question-stem,.question-content,textarea,[contenteditable="true"]')) return;
      if(type==='判断' && !options.length) options=['正确','错误'];
-     result.push({id:String(result.length),type:type,text:text,options:options,hasImage:hasImage,images:images.slice(0,7)});
+     result.push({id:String(result.length),type:type,text:text,options:options,hasImage:hasImage,images:images.slice(0,7),captureKey:'q'+result.length,needsScreenshot:needsScreenshot});
+     window.__cxAiQuestionNodes['q'+(result.length-1)]={node:node,doc:doc,text:text,others:nodes.filter(function(e){return e!==node && node.contains(e);}),excluded:excluded};
    });
    Array.from(doc.querySelectorAll('iframe')).forEach(function(frame){try{if(frame.contentDocument)scan(frame.contentDocument);}catch(e){}});
  }
  scan(document); return JSON.stringify(result.slice(0,100));
 })();
-"""
+""".replace("// AI_DOM_MEDIA", AI_DOM_MEDIA)
+
+internal val COUNT_AI_QUESTIONS = EXTRACT_AI_QUESTIONS.replace("var captureMedia=true;", "var captureMedia=false;")
 
 class AiStudyController(private val context: Context, private val appState: AndroidAppState, private val scope: CoroutineScope) {
     private val json = Json { ignoreUnknownKeys = true }

@@ -27,6 +27,7 @@ internal class AiQuestionImageReader(
     private val cookies: (String) -> String? = { CookieManager.getInstance().getCookie(it) },
 ) {
     suspend fun prepare(question: AiQuestion): AiQuestion = withContext(Dispatchers.IO) {
+        require(question.readError.isBlank()) { question.readError }
         require(!question.hasImage || question.images.isNotEmpty()) { "未提取到题图，请等图片加载后重新打开 AI 作答" }
         require(question.images.size <= 6) { "单题最多支持 6 张题图，请分题处理" }
         var total = 0
@@ -97,6 +98,9 @@ internal class AiQuestionImageReader(
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         require(bounds.outWidth > 0 && bounds.outHeight > 0) { "无法解码题图，请刷新题目图片后重试" }
+        if (bounds.outMimeType == "image/png" && bytes.size <= 1_000_000 && max(bounds.outWidth, bounds.outHeight) <= 2048) {
+            return "data:image/png;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
+        }
         var sample = 1
         while (max(bounds.outWidth, bounds.outHeight) / sample > 3072) sample *= 2
         val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })

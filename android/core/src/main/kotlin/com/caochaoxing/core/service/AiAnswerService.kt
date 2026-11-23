@@ -18,7 +18,7 @@ data class AiQuestionImage(val label: String, val source: String)
 
 @Serializable
 data class AiQuestion(val id: String, val type: String, val text: String, val options: List<String> = emptyList(),
-    val hasImage: Boolean = false, val images: List<AiQuestionImage> = emptyList())
+    val hasImage: Boolean = false, val images: List<AiQuestionImage> = emptyList(), val readError: String = "")
 
 @Serializable
 data class AiAnswer(val answer: String, val explanation: String)
@@ -49,6 +49,7 @@ class AiAnswerService(
 
     suspend fun answer(base: String, key: String, model: String, question: AiQuestion): AiAnswer {
         require(model.isNotBlank()) { "请先选择模型" }
+        require(question.readError.isBlank()) { question.readError }
         require(!question.hasImage || question.images.isNotEmpty()) { "题目包含图片，但未读取到图片内容，请重新读取题目" }
         require(question.images.size <= 6) { "单题最多支持 6 张图片" }
         require(question.images.all { it.source.startsWith("data:image/jpeg;base64,") || it.source.startsWith("data:image/png;base64,") }) {

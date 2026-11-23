@@ -51,6 +51,8 @@ class AiAnswerServiceTest {
         assertTrue(missing.isFailure)
         val remote = runCatching { service.answer("https://model.example/v1", "key", "vision", AiQuestion("1", "文字题", "图片题", images = listOf(AiQuestionImage("题图", "https://private.chaoxing.com/image")))) }
         assertTrue(remote.isFailure)
+        val partial = runCatching { service.answer("https://model.example/v1", "key", "vision", AiQuestion("1", "单选", "题干", readError = "题干截图不完整")) }
+        assertTrue(partial.isFailure)
     }
 
     @Test

@@ -83,6 +83,8 @@ internal fun AiDraftSheet(id: String, title: String, questions: List<AiQuestion>
     val controller = CaochaoxingApp.from(LocalContext.current).aiStudyController
     val drafts by controller.drafts.collectAsState()
     val draft = drafts[id]
+    var showPreview by remember(id) { mutableStateOf(false) }
+    if (showPreview) AiQuestionPreview(questions ?: draft?.questions.orEmpty()) { showPreview = false }
     val clipboard = LocalClipboardManager.current
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.9f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -92,6 +94,7 @@ internal fun AiDraftSheet(id: String, title: String, questions: List<AiQuestion>
             if (readError.isNotBlank()) Text(readError, color = CxPalette.cinnabar)
             if (readWarning.isNotBlank()) Text(readWarning, style = MaterialTheme.typography.bodyMedium)
             if (questions != null && questions.isNotEmpty() && readWarning.isBlank()) Text("已识别 ${questions.size} 道题", style = MaterialTheme.typography.bodyMedium)
+            if (!questions.isNullOrEmpty() || draft?.questions?.isNotEmpty() == true) TextButton(onClick = { showPreview = true }) { Text("查看识别内容") }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { controller.generate(id, title, questions) }, enabled = draft?.running != true && readError.isBlank()) { Text("生成答案") }
                 if (draft?.running == true) TextButton(onClick = { controller.cancel(id) }) { Text("停止") }

@@ -24,9 +24,10 @@ internal class AiQuestionPageReader(
     private val createWebView: () -> WebView = { WebView(context) },
 ) {
     private val json = Json { ignoreUnknownKeys = true }
+    private val mediaResolver = AiQuestionMediaResolver()
 
     suspend fun fromView(view: WebView): AiQuestionPage = withContext(Dispatchers.Main.immediate) {
-        withTimeoutOrNull(35_000) {
+        withTimeoutOrNull(90_000) {
             val visited = mutableSetOf<String>()
             view.url?.let { visited += it }
             collect(view, visited)
@@ -34,7 +35,7 @@ internal class AiQuestionPageReader(
     }
 
     suspend fun fromUrl(url: String): AiQuestionPage = withContext(Dispatchers.Main.immediate) {
-        withTimeoutOrNull(35_000) { open(url, mutableSetOf(url)) }
+        withTimeoutOrNull(90_000) { open(url, mutableSetOf(url)) }
             ?.takeIf { it.questions.isNotEmpty() } ?: error("未读取到章节题目，请先完成前置学习或打开做题页面")
     }
 
@@ -43,11 +44,16 @@ internal class AiQuestionPageReader(
         var questions = emptyList<AiQuestion>()
         var frameUrls = emptyList<String>()
         var stable = 0
+        var questionRaw = ""
         try {
             for (attempt in 0..8) {
-                val current = decode(evaluate(view, EXTRACT_AI_QUESTIONS))
+                val raw = evaluate(view, COUNT_AI_QUESTIONS)
+                val current = decode(raw)
                 stable = if (current.size == questions.size) stable + 1 else 0
-                if (current.size >= questions.size) questions = current
+                if (current.size > questions.size) {
+                    questionRaw = evaluate(view, EXTRACT_AI_QUESTIONS)
+                    questions = decode(questionRaw)
+                }
                 frameUrls = frames(view)
                 if (expected == 0) expected = expectedCount(view)
                 if ((expected > 0 && questions.size >= expected) || frameUrls.isNotEmpty()) break
@@ -56,16 +62,19 @@ internal class AiQuestionPageReader(
                 evaluate(view, SCROLL_AI_QUESTIONS.replace("SCROLL_STEP", (attempt + 1).toString()))
                 delay(400)
             }
+            val latest = evaluate(view, EXTRACT_AI_QUESTIONS)
+            if (decode(latest).size >= questions.size) { questionRaw = latest; questions = decode(latest) }
         } finally {
             withContext(NonCancellable) { withTimeoutOrNull(1000) { evaluate(view, RESTORE_AI_QUESTION_SCROLL) } }
         }
+        if (questions.isNotEmpty()) questions = mediaResolver.resolve(view, questionRaw, questions)
         val all = questions.toMutableList()
         var inferredTotal = questions.size
         for (url in frameUrls) {
             if (visited.size >= 8 || !visited.add(url) || !isAllowedAssessmentUrl(url)) continue
             val hint = if (questions.isEmpty() && frameUrls.size == 1) expected else 0
             val child = try {
-                withTimeoutOrNull(if (all.isEmpty()) 10_000L else 4_000L) {
+                withTimeoutOrNull(if (all.isEmpty()) 35_000L else 20_000L) {
                     open(url, visited, view.settings.userAgentString, hint)
                 }
             } catch (e: CancellationException) { throw e }
@@ -99,6 +108,11 @@ internal class AiQuestionPageReader(
         val view = createWebView().apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
+            settings.useWideViewPort = true
+            settings.loadWithOverviewMode = true
+            settings.offscreenPreRaster = true
+            measure(android.view.View.MeasureSpec.makeMeasureSpec(1080, android.view.View.MeasureSpec.EXACTLY), android.view.View.MeasureSpec.makeMeasureSpec(1600, android.view.View.MeasureSpec.EXACTLY))
+            layout(0, 0, 1080, 1600)
             userAgent?.let { settings.userAgentString = it }
             settings.allowFileAccess = false
             settings.allowContentAccess = false

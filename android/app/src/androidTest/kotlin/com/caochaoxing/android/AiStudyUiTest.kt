@@ -100,7 +100,7 @@ class AiStudyUiTest {
             assertEquals(2, question.options.size)
             assertEquals(listOf("题干图片 1", "选项 A 图片 1", "选项 B 图片 1"), question.images.map { it.label })
             val prepared = runBlocking { AiQuestionImageReader().prepare(question) }
-            assertTrue(prepared.images.all { it.source.startsWith("data:image/jpeg;base64,") })
+            assertTrue(prepared.images.all { it.source.startsWith("data:image/png;base64,") })
         } finally { instrumentation.runOnMainSync { web?.destroy() } }
     }
 
@@ -125,7 +125,7 @@ class AiStudyUiTest {
         val question = AiQuestion("1", "文字题", "看图", hasImage = true, images = listOf(AiQuestionImage("题干图", "https://image.chaoxing.com/private.png")))
         val prepared = reader.prepare(question)
         assertEquals(2, requests)
-        assertTrue(prepared.images.single().source.startsWith("data:image/jpeg;base64,"))
+        assertTrue(prepared.images.single().source.startsWith("data:image/png;base64,"))
     }
 
     @Test
