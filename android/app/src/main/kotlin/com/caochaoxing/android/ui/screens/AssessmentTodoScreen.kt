@@ -23,6 +23,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.Assignment
 import androidx.compose.material.icons.rounded.Quiz
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -30,6 +31,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -46,6 +53,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -53,6 +63,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.caochaoxing.android.CaochaoxingApp
 import com.caochaoxing.android.state.AndroidAppState
 import com.caochaoxing.android.state.AssessmentOverviewState
+import com.caochaoxing.android.state.completionKey
 import com.caochaoxing.android.ui.components.CxBadge
 import com.caochaoxing.android.ui.components.CxIconTile
 import com.caochaoxing.android.ui.components.CxSectionHeader
@@ -84,6 +95,11 @@ fun AssessmentTodoScreen(
     val uiState by appState.uiState.collectAsStateWithLifecycle()
     val appScope = rememberCoroutineScope()
     var isRefreshing by remember { mutableStateOf(false) }
+    val snackbar = remember { SnackbarHostState() }
+
+    LaunchedEffect(uiState.activePhoneNumber) {
+        snackbar.currentSnackbarData?.dismiss()
+    }
 
     LaunchedEffect(uiState.courses) {
         if (uiState.courses.isNotEmpty()) {
@@ -106,6 +122,7 @@ fun AssessmentTodoScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = CxPalette.canvas,
+        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
                 title = {
@@ -141,16 +158,28 @@ fun AssessmentTodoScreen(
                         ?.let(onCourseClick)
                 },
                 onOpenWeb = onOpenWeb,
+                onMarkCompleted = { item ->
+                    val phone = uiState.activePhoneNumber
+                    if (phone != null && controller?.setWorkCompleted(item, true, phone) == true) {
+                        snackbar.currentSnackbarData?.dismiss()
+                        appScope.launch {
+                            if (snackbar.showSnackbar("已在本机标记完成", actionLabel = "撤销") == SnackbarResult.ActionPerformed) {
+                                controller.setWorkCompleted(item, false, phone)
+                            }
+                        }
+                    }
+                },
             )
         }
     }
 }
 
 @Composable
-private fun TodoListContent(
+internal fun TodoListContent(
     state: AssessmentOverviewState,
     onCourseClick: (ChaoxingAssessmentItem) -> Unit,
     onOpenWeb: (ChaoxingAssessmentItem) -> Unit,
+    onMarkCompleted: (ChaoxingAssessmentItem) -> Unit,
 ) {
     val pending = state.pendingItems
     val grouped = remember(pending) {
@@ -207,7 +236,7 @@ private fun TodoListContent(
                 Text(
                     text = when {
                         state.errors.isNotEmpty() -> "已读取的课程没有待办。"
-                        state.hasLoadedAny -> "这个账号下的作业和考试都完成了。"
+                        state.hasLoadedAny -> "当前没有待处理的作业和考试。"
                         else -> "还没有读取到课程作业，下拉或点右上角刷新。"
                     },
                     modifier = Modifier.padding(vertical = 24.dp),
@@ -238,13 +267,14 @@ private fun TodoListContent(
                         compareBy<ChaoxingAssessmentItem> { it.deadlineAtMs ?: Long.MAX_VALUE }
                             .thenBy { it.title },
                     ),
-                    key = { "${it.kind.name}_${it.title}_${it.courseId}_${it.classId}" },
+                    key = { it.completionKey },
                 ) { item ->
-                    TodoRow(
+                    PendingAssessmentRow(
                         item = item,
                         onClick = {
                             if (!item.taskUrl.isNullOrBlank()) onOpenWeb(item) else onCourseClick(item)
                         },
+                        onMarkCompleted = { onMarkCompleted(item) },
                     )
                 }
             }
@@ -260,6 +290,47 @@ private fun TodoListContent(
                 )
             }
         }
+    }
+}
+
+@Composable
+internal fun PendingAssessmentRow(
+    item: ChaoxingAssessmentItem,
+    onClick: () -> Unit,
+    onMarkCompleted: () -> Unit,
+) {
+    if (item.kind != ChaoxingAssessmentKind.WORK) {
+        TodoRow(item, onClick)
+        return
+    }
+    val dismissState = rememberSwipeToDismissBoxState()
+    LaunchedEffect(dismissState.currentValue) {
+        if (dismissState.currentValue == SwipeToDismissBoxValue.EndToStart) {
+            // 撤销后会恢复同一个列表键，移除前清空其保存的滑动状态。
+            dismissState.snapTo(SwipeToDismissBoxValue.Settled)
+            onMarkCompleted()
+        }
+    }
+    SwipeToDismissBox(
+        state = dismissState,
+        enableDismissFromStartToEnd = false,
+        modifier = Modifier.clip(RoundedCornerShape(12.dp)).semantics {
+            customActions = listOf(CustomAccessibilityAction("标记完成") { onMarkCompleted(); true })
+        },
+        backgroundContent = {
+            Row(
+                modifier = Modifier.fillMaxSize()
+                    .background(if (dismissState.dismissDirection == SwipeToDismissBoxValue.Settled) CxPalette.canvas else CxPalette.accent)
+                    .padding(horizontal = 20.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Rounded.Check, contentDescription = null, tint = CxPalette.onAccent)
+                Text("标记完成", style = CxTypography.headline, color = CxPalette.onAccent)
+            }
+        },
+    ) {
+        Column(Modifier.background(CxPalette.canvas)) { TodoRow(item, onClick) }
     }
 }
 
@@ -300,14 +371,14 @@ private fun TodoRow(item: ChaoxingAssessmentItem, onClick: () -> Unit) {
                         !(item.kind == ChaoxingAssessmentKind.EXAM && detail.trim().toDoubleOrNull() != null)
                 }
                 val deadlineText = when {
-                    at != null -> "截止 ${formatAssessmentDeadline(at)} · ${relativeAssessmentDeadline(at, now)}"
+                    at != null -> "截止 ${formatAssessmentDeadline(at)}，${relativeAssessmentDeadline(at, now)}"
                     !item.deadlineText.isNullOrBlank() -> "截止 ${item.deadlineText}（页面未提供时分）"
-                    fallback != null -> "$fallback · 截止时间未提供"
+                    fallback != null -> "$fallback，截止时间未提供"
                     else -> "页面未提供时间"
                 }
                 Text(
-                    text = if (!item.taskUrl.isNullOrBlank()) "$deadlineText · 点击查看网页" else deadlineText,
-                    style = CxTypography.mono(11.sp),
+                    text = deadlineText,
+                    style = CxTypography.mono(12.sp),
                     color = if (item.isOverdueAt(now)) CxPalette.cinnabar else CxPalette.inkSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,

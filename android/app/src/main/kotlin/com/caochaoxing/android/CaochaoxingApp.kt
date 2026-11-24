@@ -11,6 +11,7 @@ import com.caochaoxing.android.state.AssessmentOverviewController
 import com.caochaoxing.android.state.CourseStudyController
 import com.caochaoxing.android.state.EncryptedFilePersistenceStore
 import com.caochaoxing.android.state.LiveAppStateDependencies
+import com.caochaoxing.android.state.ManualAssessmentCompletionStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -62,9 +63,12 @@ class CaochaoxingApp : Application() {
             appState = appState,
             scope = applicationScope,
         )
+        val completionStore = ManualAssessmentCompletionStore(this)
         assessmentOverviewController = AssessmentOverviewController(
             appState = appState,
             scope = applicationScope,
+            loadCompletedWorks = completionStore::load,
+            saveCompletedWorks = completionStore::save,
         )
         applicationScope.launch {
             appState.uiState

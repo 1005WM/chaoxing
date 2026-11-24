@@ -4,6 +4,7 @@
 package com.caochaoxing.android.state
 
 import com.caochaoxing.core.model.ChaoxingAssessmentItem
+import com.caochaoxing.core.model.ChaoxingAssessmentKind
 import com.caochaoxing.core.model.ChaoxingAssessmentSummary
 import com.caochaoxing.core.model.ChaoxingCourse
 import com.caochaoxing.core.network.ChaoxingHttpClient
@@ -19,6 +20,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import java.util.concurrent.atomic.AtomicLong
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+
+internal val ChaoxingAssessmentItem.completionKey: String
+    get() {
+        val url = taskUrl?.toHttpUrlOrNull()
+        val workId = url?.queryParameterNames?.firstOrNull { it.equals("workId", ignoreCase = true) }
+            ?.let { url.queryParameter(it) }?.takeIf { it.isNotBlank() }
+        return if (workId == null) id else "${kind.name}:$courseId:$classId:work:$workId"
+    }
 
 /**
  * 课程列表页用的作业 / 考试总览：按课程缓存汇总结果，供「我的课程」显示未完成数量。
@@ -28,10 +38,17 @@ data class AssessmentOverviewState(
     val loadingCourseKeys: Set<String> = emptySet(),
     val errors: Map<String, String> = emptyMap(),
     val updatedAtMs: Long = 0L,
+    val completedWorkKeys: Set<String> = emptySet(),
 ) {
+    private fun isLocallyCompleted(item: ChaoxingAssessmentItem): Boolean =
+        item.kind == ChaoxingAssessmentKind.WORK && completedWorkKeys.isNotEmpty() && item.completionKey in completedWorkKeys
+
+    private fun isPending(item: ChaoxingAssessmentItem): Boolean =
+        item.isPending && !isLocallyCompleted(item)
+
     /** 课程列表中某门课的未完成作业数。 */
     fun pendingWorks(courseKey: String): Int =
-        summaries[courseKey]?.works?.count { it.status.isPending } ?: 0
+        summaries[courseKey]?.works?.count(::isPending) ?: 0
 
     /** 课程列表中某门课的未完成考试数。 */
     fun pendingExams(courseKey: String): Int =
@@ -41,17 +58,17 @@ data class AssessmentOverviewState(
     val pendingItems: List<ChaoxingAssessmentItem>
         get() = summaries.values
             .flatMap { it.works + it.exams }
-            .filter { it.status.isPending }
+            .filter(::isPending)
             .sortedWith(
                 compareBy<ChaoxingAssessmentItem> { it.deadlineAtMs ?: Long.MAX_VALUE }
                     .thenBy { it.courseName },
             )
 
     val pendingWorkCount: Int
-        get() = summaries.values.sumOf { summary -> summary.works.count { it.status.isPending } }
+        get() = summaries.values.sumOf { summary -> summary.works.count(::isPending) }
 
     fun overdueWorkCount(nowMs: Long): Int = summaries.values.sumOf { summary ->
-        summary.works.count { it.status.isExpired || (it.isPending && it.isOverdueAt(nowMs)) }
+        summary.works.count { !isLocallyCompleted(it) && (it.status.isExpired || (it.isPending && it.isOverdueAt(nowMs))) }
     }
 
     val pendingExamCount: Int
@@ -63,7 +80,7 @@ data class AssessmentOverviewState(
     /** 有未完成项的课程数。 */
     val pendingCourseCount: Int
         get() = summaries.values.count { summary ->
-            summary.items.any { it.status.isPending }
+            summary.items.any(::isPending)
         }
 
     val hasLoadedAny: Boolean
@@ -84,10 +101,19 @@ class AssessmentOverviewController(
     private val enrichDeadlines: suspend (ChaoxingHttpClient, List<ChaoxingAssessmentItem>) -> List<ChaoxingAssessmentItem> =
         { client, works -> ChaoxingAssessmentService.enrichPendingWorkDeadlines(client, works) },
     private val maxConcurrency: Int = 3,
+    private val loadCompletedWorks: (String) -> Set<String> = { emptySet() },
+    private val saveCompletedWorks: (String, Set<String>) -> Unit = { _, _ -> },
 ) {
-    constructor(appState: AndroidAppState, scope: CoroutineScope) : this(
+    constructor(
+        appState: AndroidAppState,
+        scope: CoroutineScope,
+        loadCompletedWorks: (String) -> Set<String> = { emptySet() },
+        saveCompletedWorks: (String, Set<String>) -> Unit = { _, _ -> },
+    ) : this(
         clientProvider = { appState.activeClient },
         scope = scope,
+        loadCompletedWorks = loadCompletedWorks,
+        saveCompletedWorks = saveCompletedWorks,
     )
 
     private val _uiState = MutableStateFlow(AssessmentOverviewState())
@@ -108,7 +134,22 @@ class AssessmentOverviewController(
         generation.incrementAndGet()
         activeJobs.forEach { it.cancel() }
         activeJobs.clear()
-        _uiState.value = AssessmentOverviewState()
+        _uiState.value = AssessmentOverviewState(
+            completedWorkKeys = accountPhone?.let(loadCompletedWorks).orEmpty(),
+        )
+    }
+
+    /** 只调整本机待办，不修改学习通的提交状态。账号参数用于阻止切换账号后的旧撤销操作。 */
+    fun setWorkCompleted(item: ChaoxingAssessmentItem, completed: Boolean, phoneNumber: String): Boolean {
+        if (phoneNumber != accountPhone || item.kind != ChaoxingAssessmentKind.WORK) return false
+        val state = _uiState.value
+        val key = item.completionKey
+        if (completed && state.pendingItems.none { it.completionKey == key }) return false
+        val keys = if (completed) state.completedWorkKeys + key else state.completedWorkKeys - key
+        if (keys == state.completedWorkKeys) return false
+        saveCompletedWorks(phoneNumber, keys)
+        _uiState.update { it.copy(completedWorkKeys = keys) }
+        return true
     }
 
     /**

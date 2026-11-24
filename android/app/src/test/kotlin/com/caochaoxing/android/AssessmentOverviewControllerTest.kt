@@ -16,12 +16,96 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AssessmentOverviewControllerTest {
+    @Test
+    fun manualCompletionUpdatesAllCountsSurvivesRefreshAndCanBeUndone() = runTest {
+        val course = course(1, "数学")
+        val work = pendingWork(course, "矩估计作业").copy(deadlineAtMs = 99)
+        val exam = work.copy(kind = ChaoxingAssessmentKind.EXAM)
+        val controller = AssessmentOverviewController(
+            clientProvider = { client() }, scope = this,
+            fetchSummary = { _, _ -> ChaoxingAssessmentSummary(works = listOf(work), exams = listOf(exam)) },
+        )
+        controller.onAccountChanged("student")
+        controller.load(listOf(course))
+        advanceUntilIdle()
+        assertTrue(controller.setWorkCompleted(work, true, "student"))
+        with(controller.uiState.value) {
+            assertEquals(0, pendingWorkCount)
+            assertEquals(0, pendingWorks(course.id))
+            assertEquals(0, overdueWorkCount(100))
+            assertEquals(1, pendingExamCount)
+            assertEquals(listOf(exam), pendingItems)
+            assertEquals(1, pendingCourseCount)
+            assertEquals("未交", summaries[course.id]!!.works.single().statusText)
+        }
+        assertFalse(controller.setWorkCompleted(exam, true, "student"))
+        controller.load(listOf(course), force = true)
+        advanceUntilIdle()
+        assertEquals(0, controller.uiState.value.pendingWorkCount)
+        assertTrue(controller.setWorkCompleted(work, false, "student"))
+        assertEquals(1, controller.uiState.value.pendingWorkCount)
+        assertEquals(1, controller.uiState.value.overdueWorkCount(100))
+    }
+
+    @Test
+    fun completionMarksAreRestoredPerAccountAndRejectOldAccountUndo() = runTest {
+        val course = course(1, "数学")
+        val work = pendingWork(course, "作业")
+        val saved = mutableMapOf<String, Set<String>>()
+        fun controller() = AssessmentOverviewController(
+            clientProvider = { client() }, scope = this,
+            fetchSummary = { _, _ -> ChaoxingAssessmentSummary(works = listOf(work)) },
+            loadCompletedWorks = { saved[it].orEmpty() },
+            saveCompletedWorks = { phone, keys -> saved[phone] = keys },
+        )
+        val first = controller()
+        first.onAccountChanged("A")
+        first.load(listOf(course))
+        advanceUntilIdle()
+        assertTrue(first.setWorkCompleted(work, true, "A"))
+        assertEquals(0, first.uiState.value.pendingCourseCount)
+        first.onAccountChanged("B")
+        first.load(listOf(course))
+        advanceUntilIdle()
+        assertEquals(1, first.uiState.value.pendingWorkCount)
+        assertFalse(first.setWorkCompleted(work, false, "A"))
+        val restored = controller()
+        restored.onAccountChanged("A")
+        restored.load(listOf(course))
+        advanceUntilIdle()
+        assertEquals(0, restored.uiState.value.totalPending)
+        restored.onAccountChanged(null)
+        assertTrue(restored.uiState.value.completedWorkKeys.isEmpty())
+    }
+
+    @Test
+    fun sameTitleAssignmentsUseWorkIdAndIgnoreChangingSessionParameters() = runTest {
+        val course = course(1, "数学")
+        val first = pendingWork(course, "作业").copy(taskUrl = "https://mooc1.chaoxing.com/work?workId=1&token=old")
+        val second = first.copy(taskUrl = "https://mooc1.chaoxing.com/work?workId=2")
+        var latestFirst = first
+        val controller = AssessmentOverviewController(
+            clientProvider = { client() }, scope = this,
+            fetchSummary = { _, _ -> ChaoxingAssessmentSummary(works = listOf(latestFirst, second)) },
+        )
+        controller.onAccountChanged("student")
+        controller.load(listOf(course))
+        advanceUntilIdle()
+        assertTrue(controller.setWorkCompleted(first, true, "student"))
+        latestFirst = first.copy(title = "作业（已改名）", taskUrl = "https://mooc1.chaoxing.com/work?workId=1&token=new")
+        controller.load(listOf(course), force = true)
+        advanceUntilIdle()
+        assertEquals(listOf(second), controller.uiState.value.pendingItems)
+        assertTrue(controller.uiState.value.completedWorkKeys.none { it.contains("token") })
+    }
+
     private fun course(id: Long, name: String): ChaoxingCourse = ChaoxingCourse(
         courseName = name,
         teacherName = "老师",
