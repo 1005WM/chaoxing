@@ -1038,6 +1038,55 @@ class AndroidAppStateTest {
     )
 
     @Test
+    fun signWorkspacePreservesPartialResultsAndWaitsForPreSignBeforeDetail() = runTest {
+        val preSignStarted = CompletableDeferred<Unit>()
+        val releasePreSign = CompletableDeferred<Unit>()
+        val deps = FakeAppStateDependencies()
+        var detailReads = 0
+        val fetchDetail = deps.onFetchSignDetail
+        deps.onPrepareSign = { _, _ ->
+            preSignStarted.complete(Unit)
+            releasePreSign.await()
+            throw ChaoxingError.ParseFailed("预签到页面无法识别")
+        }
+        deps.onFetchSignDetail = { client, id, classId, courseId ->
+            detailReads++
+            fetchDetail(client, id, classId, courseId)
+        }
+        val state = AndroidAppState(InMemoryPersistenceStore(), deps, backgroundScope)
+        state.loginPrimary("13800000001", "password123")
+
+        val loading = async { state.loadSignWorkspaceInfo(resultTestActivity) }
+        preSignStarted.await()
+        runCurrent()
+        assertEquals(0, detailReads)
+        releasePreSign.complete(Unit)
+        val withDetail = loading.await()
+        assertEquals(resultTestActivity.id, withDetail.detail?.activeId)
+        assertEquals("预签到页面无法识别", withDetail.statusError)
+        assertNull(withDetail.detailError)
+
+        deps.onPrepareSign = { _, _ -> ChaoxingSignActivityStatus.EXPIRED }
+        deps.onFetchSignDetail = { _, _, _, _ -> throw ChaoxingError.ParseFailed("活动不存在") }
+        val withStatus = state.loadSignWorkspaceInfo(resultTestActivity)
+        assertEquals(ChaoxingSignActivityStatus.EXPIRED, withStatus.status)
+        assertNull(withStatus.detail)
+        assertEquals("活动不存在", withStatus.detailError)
+    }
+
+    @Test
+    fun signWorkspaceCancellationStopsBeforeDetail() = runTest {
+        val cancelled = CancellationException("账号已切换")
+        val deps = FakeAppStateDependencies(onPrepareSign = { _, _ -> throw cancelled })
+        deps.onFetchSignDetail = { _, _, _, _ -> error("已取消的请求不应读取详情") }
+        val state = AndroidAppState(InMemoryPersistenceStore(), deps, backgroundScope)
+        state.loginPrimary("13800000001", "password123")
+
+        val result = runCatching { state.loadSignWorkspaceInfo(resultTestActivity) }
+        assertSame(cancelled, result.exceptionOrNull())
+    }
+
+    @Test
     fun preExistingAndAcceptedAndUnconfirmedResultsStayDistinctInHistory() = runTest {
         val phones = listOf("prior", "server-already-signed", "accepted", "unconfirmed", "failed")
         val accounts = phones.map { sampleAccount(it) }

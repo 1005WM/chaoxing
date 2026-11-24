@@ -48,6 +48,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -75,6 +76,7 @@ import com.caochaoxing.android.media.AndroidImageObfuscator
 import com.caochaoxing.android.state.AndroidAppState
 import com.caochaoxing.android.state.BatchSignDisposition
 import com.caochaoxing.android.state.BatchSignResult
+import com.caochaoxing.android.state.SignWorkspaceInfo
 import com.caochaoxing.android.ui.components.AccountGroupSelector
 import com.caochaoxing.android.ui.components.CxBadge
 import com.caochaoxing.android.ui.components.CxFlowRow
@@ -94,7 +96,6 @@ import com.caochaoxing.core.model.ChaoxingAccountSession
 import com.caochaoxing.core.model.ChaoxingLocationSignInfo
 import com.caochaoxing.core.model.ChaoxingSignActivity
 import com.caochaoxing.core.model.ChaoxingSignActivityStatus
-import com.caochaoxing.core.model.ChaoxingSignDetailMetadata
 import com.caochaoxing.core.model.ChaoxingSignType
 import com.caochaoxing.core.network.ChaoxingHttpClient
 import com.caochaoxing.core.service.ChaoxingActivityService
@@ -200,11 +201,12 @@ private fun SignWorkspaceActivityPane(
     }
     var selectionInitialized by rememberSaveable(activity.id) { mutableStateOf(false) }
 
-    var preSignStatus by remember(activity.id) { mutableStateOf<ChaoxingSignActivityStatus?>(null) }
-    var detailMetadata by remember(activity.id) { mutableStateOf<ChaoxingSignDetailMetadata?>(null) }
-    var isLoadingInfo by remember(activity.id) { mutableStateOf(true) }
+    val sessionToken = appState.sessionToken
+    var signInfo by remember(activity.id, sessionToken) { mutableStateOf(SignWorkspaceInfo()) }
+    val preSignStatus = signInfo.status
+    val detailMetadata = signInfo.detail
+    var isLoadingInfo by remember(activity.id, sessionToken) { mutableStateOf(true) }
     var isRefreshing by remember(activity.id) { mutableStateOf(false) }
-    var hasLoadedInfo by remember(activity.id) { mutableStateOf(false) }
     var isOpeningSignOut by remember(activity.id) { mutableStateOf(false) }
 
     var isSigning by remember(activity.id) { mutableStateOf(false) }
@@ -254,29 +256,26 @@ private fun SignWorkspaceActivityPane(
         val requestId = ++loadRequestId
         val token = appState.sessionToken
         isLoadingInfo = true
-        hasLoadedInfo = false
+        signInfo = SignWorkspaceInfo()
         try {
-            val (status, detail) = appState.loadSignWorkspaceInfo(activity)
-            if (loadRequestId == requestId) {
-                preSignStatus = status
-                detailMetadata = detail
-                hasLoadedInfo = true
+            val info = appState.loadSignWorkspaceInfo(activity)
+            if (appState.isCurrent(token) && loadRequestId == requestId) {
+                signInfo = info
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             if (appState.isCurrent(token) && loadRequestId == requestId) {
-                preSignStatus = null
-                detailMetadata = null
+                signInfo = SignWorkspaceInfo(detailError = e.message ?: "读取活动失败")
             }
         } finally {
-            if (loadRequestId == requestId) {
+            if (appState.isCurrent(token) && loadRequestId == requestId) {
                 isLoadingInfo = false
             }
         }
     }
 
-    LaunchedEffect(activity.id, uiState.activePhoneNumber) {
+    LaunchedEffect(activity.id, sessionToken) {
         loadActivityInfoSuspend()
     }
 
@@ -345,7 +344,7 @@ private fun SignWorkspaceActivityPane(
     val activityClosed = preSignStatus == ChaoxingSignActivityStatus.EXPIRED
     val selectionAlreadySigned = preSignStatus == ChaoxingSignActivityStatus.ALREADY_SIGNED &&
         targetAccounts.singleOrNull()?.phoneNumber == uiState.activePhoneNumber
-    val signerEnabled = hasLoadedInfo && !isLoadingInfo && !isSigning && targetAccounts.isNotEmpty() &&
+    val signerEnabled = !isLoadingInfo && !isSigning && targetAccounts.isNotEmpty() &&
         !activityClosed && !selectionAlreadySigned
 
     fun startBatchSign(
@@ -462,6 +461,7 @@ private fun SignWorkspaceActivityPane(
     val effectiveSignType = remember(detailMetadata, activity.signType) {
         detailMetadata?.signType?.takeIf { it != ChaoxingSignType.UNKNOWN } ?: activity.signType
     }
+    val canShowSignPanel = signInfo.hasAny || effectiveSignType == ChaoxingSignType.QR_CODE
     val positionRequired = detailMetadata?.isPositionRequired == true
     val faceRequired = detailMetadata?.isFaceRequired == true
     val jitterEnabled = uiState.enableLocationJitter
@@ -549,7 +549,7 @@ private fun SignWorkspaceActivityPane(
 
                         CxFlowRow(horizontalSpacing = 6.dp, verticalSpacing = 6.dp) {
                             val typeLabel = if (effectiveSignType == ChaoxingSignType.PHOTO_OR_CLICK && detailMetadata != null) {
-                                if (detailMetadata?.isPhotoRequired == true) "拍照签到" else "普通签到"
+                                if (detailMetadata.isPhotoRequired) "拍照签到" else "普通签到"
                             } else effectiveSignType.displayName
                             CxBadge(text = typeLabel, tone = CxTone.ACCENT)
 
@@ -573,6 +573,10 @@ private fun SignWorkspaceActivityPane(
                                         showDot = true,
                                     )
                                 }
+                            }
+
+                            if (preSignStatus == null && signInfo.statusError != null) {
+                                CxBadge(text = "状态未确认", tone = CxTone.CINNABAR, showDot = true)
                             }
 
                             if (activity.isLate) {
@@ -682,6 +686,26 @@ private fun SignWorkspaceActivityPane(
                         }
                     }
 
+                    if (!isLoadingInfo && (signInfo.statusError != null || detailMetadata == null)) {
+                        CxSurfaceCard(modifier = Modifier.fillMaxWidth(), showBorder = false) {
+                            signInfo.statusError?.let { error ->
+                                Text("预签到：$error", color = CxPalette.cinnabar, style = MaterialTheme.typography.bodyMedium)
+                            }
+                            if (detailMetadata == null) {
+                                val reason = signInfo.detailError ?: "服务端未返回详情"
+                                Text("活动要求未读取到（$reason）", style = MaterialTheme.typography.bodyMedium)
+                                if (!activityClosed && !selectionAlreadySigned && canShowSignPanel) {
+                                    Text(
+                                        "已按列表中的签到类型显示。定位、人脸、拍照和滑块要求以服务端为准。",
+                                        color = CxPalette.inkSecondary,
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                            }
+                            TextButton(onClick = ::triggerRefresh, enabled = !isSigning) { Text("重新加载") }
+                        }
+                    }
+
                     CxSectionHeader(
                         title = if (activityClosed || selectionAlreadySigned) "签到状态" else "签到",
                         modifier = Modifier.padding(top = 4.dp),
@@ -691,20 +715,17 @@ private fun SignWorkspaceActivityPane(
                         modifier = Modifier.fillMaxWidth(),
                         showBorder = false,
                     ) {
-                        if (!hasLoadedInfo || activityClosed || selectionAlreadySigned) {
+                        if (isLoadingInfo || activityClosed || selectionAlreadySigned || !canShowSignPanel) {
                             Text(
                                 text = when {
-                                    isLoadingInfo -> "正在读取活动要求…"
-                                    !hasLoadedInfo -> "暂时无法读取活动要求"
                                     activityClosed -> "已截止，无法再提交"
-                                    else -> "此账号已完成签到"
+                                    selectionAlreadySigned -> "此账号已完成签到"
+                                    isLoadingInfo -> "正在读取活动要求…"
+                                    else -> "暂时无法读取活动要求"
                                 },
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = CxPalette.inkSecondary,
                             )
-                            if (!hasLoadedInfo && !isLoadingInfo) {
-                                androidx.compose.material3.TextButton(onClick = ::triggerRefresh) { Text("重新加载") }
-                            }
                             return@CxSurfaceCard
                         }
                         when (effectiveSignType) {

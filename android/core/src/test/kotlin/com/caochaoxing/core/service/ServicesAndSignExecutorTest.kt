@@ -434,6 +434,48 @@ class ServicesAndSignExecutorTest {
         }
     }
 
+    @Test
+    fun `detail without otherId preserves metadata but cannot identify a standalone QR activity`() = runBlocking {
+        withServer(handler = {
+            MockResponse().setBody("""{"result":true,"data":{"clazzid":52,"courseId":41}}""")
+        }) { _, endpoints, _ ->
+            val client = ChaoxingHttpClient.createForLoopbackTesting(syntheticSession())
+            try {
+                val detail = ChaoxingActivityService.fetchSignDetail(endpoints, client, activeId = 61L)
+                assertEquals(61L, detail.activeId)
+                assertEquals(ChaoxingSignType.UNKNOWN, detail.signType)
+                assertEquals(52, detail.signOutInfo.classId)
+                assertEquals(41L, detail.signOutInfo.courseId)
+
+                val error = assertSuspendsThrows<ChaoxingError.ParseFailed> {
+                    ChaoxingActivityService.buildActivityFromQrCode(
+                        endpoints, client, ChaoxingQrCodeParseResult(aid = 61L, code = "qr1", enc = "enc1"),
+                    )
+                }
+                assertEquals("二维码不是可识别的签到活动", error.message)
+            } finally {
+                client.invalidate()
+            }
+        }
+    }
+
+    @Test
+    fun `detail failure keeps the server message`() = runBlocking {
+        withServer(handler = {
+            MockResponse().setBody("""{"result":false,"msg":"活动不存在"}""")
+        }) { _, endpoints, _ ->
+            val client = ChaoxingHttpClient.createForLoopbackTesting(syntheticSession())
+            try {
+                val error = assertSuspendsThrows<ChaoxingError.ParseFailed> {
+                    ChaoxingActivityService.fetchSignDetail(endpoints, client, activeId = 998L)
+                }
+                assertEquals("活动不存在", error.message)
+            } finally {
+                client.invalidate()
+            }
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Required Case 3: CloudDrive uploadImage clears cached token on 401 & retries
     // -------------------------------------------------------------------------

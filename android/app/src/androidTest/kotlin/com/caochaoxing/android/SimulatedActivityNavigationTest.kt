@@ -36,7 +36,7 @@ class SimulatedActivityNavigationTest {
         val automation = instrumentation.uiAutomation
         val course = ChaoxingCourse("交互设计基础", "陈老师", 41L, 52, "")
         val pending = ChaoxingSignActivity(
-            id = 61, endTimeMs = System.currentTimeMillis() + 3_600_000, userStatus = 0, otherId = "0", isLook = false, type = 2, activeType = 2,
+            id = 61, endTimeMs = System.currentTimeMillis() + 3_600_000, userStatus = 0, otherId = "2", isLook = false, type = 2, activeType = 2,
             nameOne = "课堂练习签到", status = 1, nameFour = "", courseId = course.courseId,
             classId = course.classId, courseName = course.courseName, extContent = "",
         )
@@ -50,6 +50,7 @@ class SimulatedActivityNavigationTest {
             override suspend fun archiveAndReset(): File = error("Unexpected reset")
         }
         val requests = AtomicInteger()
+        val preSignReads = AtomicInteger()
         val detailReads = AtomicInteger()
         val deps = LiveAppStateDependencies(
             sharedHttpClient = OkHttpClient.Builder().addInterceptor {
@@ -66,14 +67,17 @@ class SimulatedActivityNavigationTest {
             onFetchCourseActivities = { _, _ -> listOf(closed, signed, pending) },
             onPrepareSign = { _, activity ->
                 when (activity.id) {
-                    pending.id -> ChaoxingSignActivityStatus.READY_TO_SIGN
+                    pending.id -> {
+                        if (preSignReads.getAndIncrement() == 0) throw ChaoxingError.ParseFailed("预签到页面无法识别")
+                        ChaoxingSignActivityStatus.READY_TO_SIGN
+                    }
                     signed.id -> ChaoxingSignActivityStatus.ALREADY_SIGNED
                     else -> ChaoxingSignActivityStatus.EXPIRED
                 }
             },
             onFetchSignDetail = { _, id, classId, courseId ->
-                if (detailReads.getAndIncrement() == 0) throw IOException("Simulated offline response")
-                ChaoxingSignDetailMetadata(id, pending.signType, "", false, false, false, false,
+                if (id == pending.id && detailReads.getAndIncrement() == 0) throw ChaoxingError.ParseFailed("服务端详情暂不可用")
+                ChaoxingSignDetailMetadata(id, ChaoxingSignType.UNKNOWN, "", false, false, false, false,
                     false, signOutInfo = ChaoxingSignOutInfo(classId = classId, courseId = courseId))
             },
         )
@@ -130,21 +134,29 @@ class SimulatedActivityNavigationTest {
                 assertTrue(top(pending.nameOne) < top(signed.nameOne))
                 capture("activities")
                 click(pending.nameOne)
+                waitFor("状态未确认")
+                waitFor("预签到：预签到页面无法识别")
+                waitFor("活动要求未读取到（服务端详情暂不可用）")
+                assertTrue(waitFor("相机扫码").isEnabled)
+                assertTrue(waitFor("相册识图").isEnabled)
+                waitFor("粘贴学习通二维码链接或 SIGNIN 参数")
+                capture("qr-fallback")
                 waitFor("重新加载")
-                assertNull(node("提交签到"))
                 click("重新加载")
                 waitFor("当前账号待签到")
-                waitFor("提交签到")
+                assertTrue(waitFor("相机扫码").isEnabled)
                 capture("pending")
                 click("返回")
                 click(closed.nameOne)
                 waitFor("活动已截止")
                 capture("closed")
-                assertNull("Expired activity still offers submission", node("提交签到"))
+                waitFor("已截止，无法再提交")
+                assertNull("Expired activity still offers a QR panel", node("相机扫码"))
                 click("返回")
                 click(signed.nameOne)
                 waitFor("当前账号已签到")
-                assertNull("Signed activity still offers submission", node("提交签到"))
+                waitFor("此账号已完成签到")
+                assertNull("Signed activity still offers a QR panel", node("相机扫码"))
                 click("返回")
                 waitFor("刷新活动")
                 automation.waitForIdle(600, 5000)

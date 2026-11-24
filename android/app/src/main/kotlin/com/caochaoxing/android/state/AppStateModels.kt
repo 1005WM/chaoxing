@@ -16,6 +16,8 @@ import com.caochaoxing.core.model.ChaoxingIMGroup
 import com.caochaoxing.core.model.ChaoxingLocationPreset
 import com.caochaoxing.core.model.ChaoxingModelDefaults
 import com.caochaoxing.core.model.ChaoxingSignActivity
+import com.caochaoxing.core.model.ChaoxingSignActivityStatus
+import com.caochaoxing.core.model.ChaoxingSignDetailMetadata
 import com.caochaoxing.core.network.ChaoxingHttpClient
 import com.caochaoxing.core.signer.ChaoxingSignOutcome
 import com.caochaoxing.core.store.ChaoxingAppStateSnapshot
@@ -33,6 +35,16 @@ data class PendingRadarItem(
     val course: ChaoxingCourse,
     val activity: ChaoxingSignActivity,
 )
+
+@Immutable
+data class SignWorkspaceInfo(
+    val status: ChaoxingSignActivityStatus? = null,
+    val detail: ChaoxingSignDetailMetadata? = null,
+    val statusError: String? = null,
+    val detailError: String? = null,
+) {
+    val hasAny: Boolean get() = status != null || detail != null
+}
 
 /**
  * Pending slider captcha verification challenge presented by the UI dialog layer.

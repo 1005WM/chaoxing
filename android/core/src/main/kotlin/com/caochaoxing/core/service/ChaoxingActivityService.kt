@@ -142,14 +142,12 @@ object ChaoxingActivityService {
         }
         val root = parseJsonObjectOrNull(response.body)
         val info = root?.takeIf { it.strictBooleanOrNull("result") != false }?.objectOrNull("data")
-        val rawOtherId = info?.stringOrNumberString("otherId")
-            ?: throw ChaoxingError.ParseFailed("获取签到活动信息失败")
-
-        val otherIdStr = rawOtherId.trim { it.isWhitespace() }
-        if (otherIdStr.isEmpty()) {
-            throw ChaoxingError.ParseFailed("签到详情缺少活动类型")
-        }
-        val signType = ChaoxingSignType.fromOtherId(otherIdStr)
+            ?: throw ChaoxingError.ParseFailed(
+                sequenceOf("msg", "errorMsg", "message")
+                    .mapNotNull { root?.stringOnlyOrNull(it)?.trim()?.takeIf(String::isNotEmpty) }
+                    .firstOrNull() ?: "获取签到活动信息失败",
+            )
+        val signType = ChaoxingSignType.fromOtherId(info.stringOrNumberString("otherId").orEmpty().trim())
         val title = info.stringOnlyOrNull("name")
             ?: info.stringOnlyOrNull("title")
             ?: signType.displayName
@@ -225,6 +223,9 @@ object ChaoxingActivityService {
         val aid = qrResult.aid
             ?: throw ChaoxingError.QrCodeParseFailed("二维码中未包含签到活动 ID")
         val detail = fetchSignDetail(endpoints, client, activeId = aid)
+        if (detail.signType == ChaoxingSignType.UNKNOWN) {
+            throw ChaoxingError.ParseFailed("二维码不是可识别的签到活动")
+        }
         return ChaoxingSignActivity(
             id = aid,
             startTimeMs = null,

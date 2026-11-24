@@ -18,7 +18,7 @@ import com.caochaoxing.core.model.ChaoxingLocationPreset
 import com.caochaoxing.core.model.ChaoxingModelDefaults
 import com.caochaoxing.core.model.ChaoxingSignActivity
 import com.caochaoxing.core.model.ChaoxingSignActivityStatus
-import com.caochaoxing.core.model.ChaoxingSignDetailMetadata
+import com.caochaoxing.core.model.ChaoxingSignType
 import com.caochaoxing.core.network.ChaoxingHttpClient
 import com.caochaoxing.core.signer.ChaoxingSignExecutor
 import com.caochaoxing.core.signer.ChaoxingSignOutcome
@@ -531,14 +531,36 @@ class AndroidAppState(
 
     suspend fun loadSignWorkspaceInfo(
         activity: ChaoxingSignActivity,
-    ): Pair<ChaoxingSignActivityStatus, ChaoxingSignDetailMetadata> {
+    ): SignWorkspaceInfo {
         val token = sessionToken
-        val client = checkNotNull(activeClient)
-        val status = dependencies.prepareSign(client, activity)
+        val client = activeClient ?: throw ChaoxingError.SessionExpired()
+        // 预签到可能刷新会话，详情请求要等它结束。
+        val status = captureSignInfo { dependencies.prepareSign(client, activity) }
         checkSession(token)
-        val detail = dependencies.fetchSignDetail(client, activity.id, activity.classId, activity.courseId)
+        val detail = captureSignInfo {
+            dependencies.fetchSignDetail(client, activity.id, activity.classId, activity.courseId)
+        }
         checkSession(token)
-        return status to detail
+        return SignWorkspaceInfo(
+            status = status.getOrNull(),
+            detail = detail.getOrNull(),
+            statusError = status.exceptionOrNull()?.let(::describeSignInfoError),
+            detailError = detail.exceptionOrNull()?.let(::describeSignInfoError),
+        )
+    }
+
+    private suspend fun <T> captureSignInfo(read: suspend () -> T): Result<T> = try {
+        Result.success(read())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+    private fun describeSignInfoError(error: Throwable): String = when (error) {
+        is ChaoxingError.SessionExpired -> "登录会话已失效，请重新登录后再试"
+        is ChaoxingError.NoPermission -> "服务端拒绝访问该活动：${error.message}"
+        else -> error.message ?: error.javaClass.simpleName
     }
 
     suspend fun loadCourseActivities(course: ChaoxingCourse): List<ChaoxingSignActivity> {
@@ -1008,7 +1030,8 @@ class AndroidAppState(
                         startTimeMs = null,
                         endTimeMs = null,
                         userStatus = 0,
-                        otherId = metadata?.signType?.rawValue ?: (query("type") ?: "-1"),
+                        otherId = metadata?.signType?.takeUnless { it == ChaoxingSignType.UNKNOWN }?.rawValue
+                            ?: (query("type") ?: "-1"),
                         isLook = false,
                         type = 2,
                         activeType = 2,
