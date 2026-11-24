@@ -21,7 +21,7 @@ data class AiQuestion(val id: String, val type: String, val text: String, val op
     val hasImage: Boolean = false, val images: List<AiQuestionImage> = emptyList(), val readError: String = "")
 
 @Serializable
-data class AiAnswer(val answer: String, val explanation: String)
+data class AiAnswer(val answer: String, val explanation: String, val notice: String = "")
 
 class AiAnswerService(
     private val http: OkHttpClient = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
@@ -88,37 +88,7 @@ class AiAnswerService(
         val response = request(Request.Builder().url(endpoint(base, "chat/completions"))
             .header("Authorization", "Bearer " + key.trim())
             .post(payload.toString().toRequestBody("application/json".toMediaType())).build(), vision = question.images.isNotEmpty())
-        val content = response.jsonObject["choices"]?.jsonArray?.firstOrNull()?.jsonObject
-            ?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull
-            ?: error("模型未返回答案")
-        val start = content.indexOf('{')
-        val end = content.lastIndexOf('}')
-        require(start >= 0 && end > start) { "模型返回格式不正确，可重试本题" }
-        val answer = runCatching { json.decodeFromString<AiAnswer>(content.substring(start, end + 1)) }
-            .getOrElse { error("模型返回格式不正确，可重试本题") }
-        require(answer.answer.isNotBlank()) { "模型返回了空答案" }
-        if (question.options.isNotEmpty() && answer.answer != "需人工确认") {
-            var selection = answer.answer
-            if (question.type.contains("判断")) {
-                val meaning = judgmentMeaning(selection)
-                if (meaning != null) {
-                    val index = question.options.indexOfFirst { judgmentMeaning(it) == meaning }
-                    if (index >= 0) selection = ('A' + index).toString()
-                }
-            }
-            val letters = selection.uppercase().filter { !it.isWhitespace() && it != ',' && it != '，' }
-            require(letters.isNotEmpty() && letters.all { it in 'A'..('A' + question.options.lastIndex) } &&
-                letters.toSet().size == letters.length) { "模型返回的选项不在题目中，请重试" }
-            require(!(question.type.contains("单选") || question.type.contains("判断")) || letters.length == 1) { "单选或判断题返回了多个选项" }
-            return answer.copy(answer = letters)
-        }
-        return answer
-    }
-
-    private fun judgmentMeaning(text: String): Boolean? = when (text.trim().lowercase()) {
-        "正确", "对", "是", "true", "t", "√", "✓" -> true
-        "错误", "错", "否", "false", "f", "×", "✗" -> false
-        else -> null
+        return readAiReply(response, question)
     }
 
     private suspend fun request(request: Request, vision: Boolean = false): JsonElement = suspendCancellableCoroutine { continuation ->

@@ -56,9 +56,12 @@ internal fun questionCardStem(question: AiQuestion): String {
         if (suffix == null) { stem = original; break }
         stem = stem.substring(0, suffix.range.first).trimEnd()
     }
-    val lines = stem.lines()
     val heading = Regex("^(?:\\d+[.、．]\\s*)?[（(【\\[]?(?:单选|多选|判断|填空|文字)题?[）)】\\]]?$")
-    if (lines.size > 1 && heading.matches(lines.first().trim())) stem = lines.drop(1).joinToString("\n").trim()
+    val lines = stem.lines().filterNot { it.isBlank() }
+    val headingIndex = if (lines.firstOrNull()?.trim()?.matches(Regex("\\d+[.、．]")) == true) 1 else 0
+    if (lines.size > headingIndex + 1 && heading.matches(lines[headingIndex].trim())) {
+        stem = lines.drop(headingIndex + 1).joinToString("\n").trim()
+    }
     return stem.ifBlank { original }
 }
 
@@ -68,19 +71,18 @@ private const val FULL_QUESTION_IMAGE = "完整题目截图"
 
 @Composable
 private fun QuestionContent(text: String, images: List<AiQuestionImage>, onOpenImage: (AiQuestionImage) -> Unit) {
-    val textStyle = MaterialTheme.typography.bodyLarge
     val remaining = images.associateByTo(linkedMapOf()) { it.label }
     var start = 0
     for (marker in imageMarker.findAll(text)) {
         val before = text.substring(start, marker.range.first).trim()
-        if (before.isNotEmpty()) Text(before, color = CxPalette.ink, style = textStyle)
+        if (before.isNotEmpty()) AiMathExplanation(before)
         remaining.remove(marker.groupValues[1])?.let { image ->
             key(image.label) { AiQuestionPicture(image) { onOpenImage(image) } }
         }
         start = marker.range.last + 1
     }
     val tail = text.substring(start).trim()
-    if (tail.isNotEmpty()) Text(tail, color = CxPalette.ink, style = textStyle)
+    if (tail.isNotEmpty()) AiMathExplanation(tail)
 
     for (image in remaining.values) {
         key(image.label) {
@@ -101,6 +103,9 @@ internal fun AiQuestionCard(question: AiQuestion, number: Int, footer: (@Composa
                 ?.takeIf { it in question.options.indices }
         }
     }
+    val stemImages = imagesByOption[null].orEmpty()
+    val screenshotOnly = stemImages.any { it.label.startsWith(FULL_QUESTION_IMAGE) }
+    val options = if (screenshotOnly) emptyList() else question.options
     var openImage by remember(question.images) { mutableStateOf<AiQuestionImage?>(null) }
     openImage?.let { AiQuestionImageDialog(it) { openImage = null } }
     Surface(shape = RoundedCornerShape(16.dp), color = CxPalette.surface,
@@ -111,13 +116,13 @@ internal fun AiQuestionCard(question: AiQuestion, number: Int, footer: (@Composa
                     Text("第 $number 题", color = CxPalette.accent, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
                     Text(if (question.type.endsWith("题")) question.type else "${question.type}题", color = CxPalette.inkSecondary, style = MaterialTheme.typography.bodySmall)
                 }
-                val stem = remember(question) { questionCardStem(question) }
-                val images = imagesByOption[null].orEmpty()
+                val stem = if (screenshotOnly) "" else remember(question) { questionCardStem(question) }
+                val images = if (screenshotOnly) stemImages.filter { it.label.startsWith(FULL_QUESTION_IMAGE) } else stemImages
                 QuestionContent(if (stem == "图片题" && images.isNotEmpty()) "" else stem, images) { openImage = it }
             }
-            if (question.options.isNotEmpty() || question.readError.isNotBlank() || footer != null) {
+            if (options.isNotEmpty() || question.readError.isNotBlank() || footer != null) {
                 Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    question.options.forEachIndexed { index, option ->
+                    options.forEachIndexed { index, option ->
                         if (index > 0) HorizontalDivider(color = CxPalette.border.copy(alpha = 0.5f))
                         Row(Modifier.fillMaxWidth().heightIn(min = 40.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
                             Surface(shape = RoundedCornerShape(8.dp), color = CxPalette.canvas) {

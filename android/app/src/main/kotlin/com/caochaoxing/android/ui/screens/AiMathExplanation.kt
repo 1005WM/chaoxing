@@ -27,7 +27,7 @@ private const val EXPLANATION_ASSET = "file:///android_asset/ai-math/answer.html
 internal fun AiMathExplanation(text: String) {
     val hasFormula = text.contains("\\(") || text.contains("\\[") || text.count { it == '$' } >= 2 || legacyMath.containsMatchIn(text)
     if (!hasFormula || text.length > 12_000) {
-        Text(text)
+        Text(text, color = CxPalette.ink, style = MaterialTheme.typography.bodyLarge)
         return
     }
 
@@ -38,7 +38,7 @@ internal fun AiMathExplanation(text: String) {
         key(text, maxWidth, color, fontSize) {
             var measuredHeight by remember { mutableIntStateOf(0) }
             Column {
-                if (measuredHeight == 0) Text(text)
+                if (measuredHeight == 0) Text(text, color = CxPalette.ink, style = MaterialTheme.typography.bodyLarge)
                 AndroidView(
                     modifier = Modifier.fillMaxWidth().height(measuredHeight.coerceAtLeast(1).dp),
                     factory = { context ->

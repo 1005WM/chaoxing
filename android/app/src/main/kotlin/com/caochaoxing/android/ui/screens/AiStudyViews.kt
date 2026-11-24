@@ -4,6 +4,7 @@ package com.caochaoxing.android.ui.screens
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -19,6 +20,7 @@ import com.caochaoxing.android.CaochaoxingApp
 import com.caochaoxing.android.state.*
 import com.caochaoxing.android.ui.theme.CxPalette
 import com.caochaoxing.core.service.AiQuestion
+import com.caochaoxing.core.service.AiAnswer
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -126,10 +128,7 @@ internal fun AiDraftSheet(id: String, title: String, questions: List<AiQuestion>
                         val error = current.errors[question.id]
                         if (answer != null || error != null) HorizontalDivider(color = CxPalette.border)
                         if (answer != null) key(id, answer) {
-                            var edited by rememberSaveable { mutableStateOf(answer.answer) }
-                            OutlinedTextField(edited, { edited = it }, label = { Text("建议答案") }, modifier = Modifier.fillMaxWidth())
-                            AiMathExplanation(answer.explanation)
-                            TextButton(onClick = { clipboard.setText(AnnotatedString(edited)) }) { Text("复制答案") }
+                            AiAnswerContent(answer) { clipboard.setText(AnnotatedString(it)) }
                         }
                         if (error != null) Text(error, color = CxPalette.cinnabar)
                         TextButton(onClick = { controller.generate(id, title, current.questions, retryId = question.id) }, enabled = !current.running) { Text("重试本题") }
@@ -138,6 +137,21 @@ internal fun AiDraftSheet(id: String, title: String, questions: List<AiQuestion>
             }
         }
     }
+}
+
+@Composable
+internal fun AiAnswerContent(answer: AiAnswer, onCopy: (String) -> Unit) {
+    if (answer.notice.isNotBlank()) Text(answer.notice, color = CxPalette.inkSecondary, style = MaterialTheme.typography.bodyMedium)
+    if (answer.answer.isBlank()) {
+        Text("模型原始回复", style = MaterialTheme.typography.titleMedium)
+        SelectionContainer { Text(answer.explanation, color = CxPalette.ink, style = MaterialTheme.typography.bodyLarge) }
+        TextButton(onClick = { onCopy(answer.explanation) }) { Text("复制回复") }
+        return
+    }
+    var edited by rememberSaveable { mutableStateOf(answer.answer) }
+    OutlinedTextField(edited, { edited = it }, label = { Text("建议答案") }, modifier = Modifier.fillMaxWidth())
+    if (answer.explanation.isNotBlank()) AiMathExplanation(answer.explanation)
+    TextButton(onClick = { onCopy(edited) }) { Text("复制答案") }
 }
 
 @Composable

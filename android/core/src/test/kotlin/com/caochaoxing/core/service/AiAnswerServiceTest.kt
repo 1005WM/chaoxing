@@ -72,10 +72,56 @@ class AiAnswerServiceTest {
             Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
                 .body("""{"choices":[{"message":{"content":"{\"answer\":\"Z\",\"explanation\":\"test\"}"}}]}""".toResponseBody()).build()
         }.build()
-        val result = runCatching {
-            AiAnswerService(http).answer("https://model.example/v1", "test", "model", AiQuestion("1", "单选", "先进先出", listOf("栈", "队列")))
+        val result = AiAnswerService(http).answer("https://model.example/v1", "test", "model", AiQuestion("1", "单选", "先进先出", listOf("栈", "队列")))
+        assertTrue(result.answer.isBlank())
+        assertTrue(result.explanation.contains("\"answer\":\"Z\""))
+        assertTrue(result.notice.isNotBlank())
+    }
+
+    private val question = AiQuestion("1", "单选", "选择正确答案", listOf("A项", "B项", "C项"))
+
+    private fun modelReply(content: JsonElement, finish: String = "stop") = buildJsonObject {
+        putJsonArray("choices") {
+            addJsonObject {
+                put("finish_reason", finish)
+                putJsonObject("message") { put("content", content) }
+            }
         }
-        assertTrue(result.isFailure)
+    }
+
+    @Test
+    fun recoversFencedJsonWithUnescapedLatexWithoutChangingFormula() {
+        val reply = """附注 {提示}
+            |```json
+            |{"answer":"B","explanation":"公式为 \(\frac{\theta}{x_i}\)，条件为 \(x_i\ge 1\)。"}
+            |```
+            |附注 {结束}
+        """.trimMargin()
+        val answer = readAiReply(modelReply(JsonPrimitive(reply)), question)
+        assertEquals("B", answer.answer)
+        assertEquals("公式为 \\(\\frac{\\theta}{x_i}\\)，条件为 \\(x_i\\ge 1\\)。", answer.explanation)
+    }
+
+    @Test
+    fun readsExplicitPlainTextAnswerAndKeepsExplanation() {
+        val text = "**答案：B**\n密度的乘积就是似然函数。"
+        val parts = buildJsonArray { addJsonObject { put("type", "text"); put("text", text) } }
+        val answer = readAiReply(modelReply(parts), question)
+        assertEquals("B", answer.answer)
+        assertTrue(answer.explanation.contains("密度的乘积就是似然函数。"))
+    }
+
+    @Test
+    fun showsAmbiguousAndTruncatedRepliesWithoutGuessingAnOption() {
+        val uncertain = "我在选项 A 和 B 之间不确定。"
+        val rawAnswer = readAiReply(modelReply(JsonPrimitive(uncertain)), question)
+        assertEquals("", rawAnswer.answer)
+        assertEquals(uncertain, rawAnswer.explanation)
+        val partial = """{"answer":"B","explanation":"密度乘积"""
+        val partialAnswer = readAiReply(modelReply(JsonPrimitive(partial), "length"), question)
+        assertEquals("B", partialAnswer.answer)
+        assertEquals(partial, partialAnswer.explanation)
+        assertTrue(partialAnswer.notice.contains("截断"))
     }
 
     @Test

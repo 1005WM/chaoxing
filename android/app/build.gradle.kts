@@ -16,8 +16,8 @@ android {
         applicationId = "com.caochaoxing.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 25
-        versionName = "1.6.10"
+        versionCode = 26
+        versionName = "1.6.11"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
