@@ -128,7 +128,7 @@ internal fun AiDraftSheet(id: String, title: String, questions: List<AiQuestion>
                         if (answer != null) key(id, answer) {
                             var edited by rememberSaveable { mutableStateOf(answer.answer) }
                             OutlinedTextField(edited, { edited = it }, label = { Text("建议答案") }, modifier = Modifier.fillMaxWidth())
-                            Text(answer.explanation)
+                            AiMathExplanation(answer.explanation)
                             TextButton(onClick = { clipboard.setText(AnnotatedString(edited)) }) { Text("复制答案") }
                         }
                         if (error != null) Text(error, color = CxPalette.cinnabar)

@@ -101,6 +101,7 @@ import com.caochaoxing.android.ui.screens.GroupListScreen
 import com.caochaoxing.android.ui.screens.KeepScreenOnWhileWatching
 import com.caochaoxing.android.ui.screens.LocationPresetsScreen
 import com.caochaoxing.android.ui.screens.LoginScreen
+import com.caochaoxing.android.ui.screens.AppUpdateHost
 import com.caochaoxing.android.ui.screens.OtherUsersScreen
 import com.caochaoxing.android.ui.screens.SettingsScreen
 import com.caochaoxing.android.ui.screens.SignHistoryScreen
@@ -136,6 +137,7 @@ class MainActivity : ComponentActivity() {
                     appState = app.appState,
                     courseStudyController = app.courseStudyController,
                 )
+                AppUpdateHost(app.updateManager)
             }
         }
     }

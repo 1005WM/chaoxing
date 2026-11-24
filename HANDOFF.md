@@ -4,6 +4,7 @@
 
 - 更新源为 `1005WM/chaoxing` 的 GitHub Releases。Android 的 `UpdateSource` 和 Swift 的 `AppUpdateSource` 可配置镜像 `latest.json`。
 - Android 镜像元数据超时为 2 秒，GitHub API 失败后还会尝试 Release 的 `latest.json`。检查结果缓存 5 分钟。
+- Android 每次冷启动检查一次。只有发现可安装的新正式版才自动淡入更新弹窗，关闭时淡出。同一进程内回到首页不会重复提醒，手动入口仍可打开弹窗。
 - Android 下载进度条只放在更新弹窗中，位于更新说明上方。显示百分比和已下载大小；总大小未知时显示不定进度。
 - APK 下载在应用私有缓存的 `updates` 目录，FileProvider 仅暴露此目录。安装前检查包名、签名、版本号和构建号，有 SHA256 时校验摘要。
 - 发布包沿用本机 Debug 签名，应用标识带 `.debug`。后续覆盖安装须保留同一签名并递增构建号。
@@ -20,6 +21,7 @@
 
 ## Android AI 作答
 
+- `AiMathExplanation` 用 APK 内置的 KaTeX 排版解析中的 LaTeX，只为含公式的解析加载本地 WebView。旧解析中的简单上下标按原字符排版，斜线和括号保持原义。未知语法保留原文。模型输出只作为文本传入，WebView 禁止联网。
 - `AiAnswerService` 使用兼容 Chat Completions 的 HTTPS 接口。设置页填 URL 和 Key 后自动请求 `/models`，也支持手动填写模型。
 - `AiStudyController` 串行生成草稿。Key 用 Android Keystore 加密保存在独立设置中。草稿在当前进程内复用，切换账号时清空。
 - 作业网页通过渲染后的题干和选项提取题目。章节测验从任务链接读取。视频完成后会重试此前未读到题目的测验。

@@ -23,23 +23,49 @@ enum class UpdatePhase(val label: String) {
 data class AppUpdateState(val phase: UpdatePhase = UpdatePhase.IDLE, val release: UpdateRelease? = null,
     val size: Long = 0, val received: Long = 0, val message: String = "")
 
-class AppUpdateManager(private val context: Context, private val scope: CoroutineScope) {
-    private val service = AppUpdateService()
+class AppUpdateManager(
+    private val context: Context,
+    private val scope: CoroutineScope,
+    private val service: AppUpdateService = AppUpdateService(),
+    private val latestRelease: suspend () -> UpdateRelease = service::latest,
+) {
     private val _state = MutableStateFlow(AppUpdateState())
     val state = _state.asStateFlow()
+    private val _dialogVisible = MutableStateFlow(false)
+    val dialogVisible = _dialogVisible.asStateFlow()
+    private var startupChecked = false
+    private var manualDialogOpened = false
     private var job: Job? = null
     private var cached: UpdateRelease? = null
     private var checkedAt = 0L
     private val apk = File(context.cacheDir, "updates/update.apk")
     private val partial = File(context.cacheDir, "updates/update.part")
 
-    fun check() {
+    fun checkOnLaunch() {
+        if (startupChecked) return
+        startupChecked = true
+        if (_state.value.phase == UpdatePhase.IDLE) check(announce = true)
+    }
+
+    fun openDialog() {
+        manualDialogOpened = true
+        _dialogVisible.value = true
+        if (_state.value.phase in listOf(UpdatePhase.IDLE, UpdatePhase.CURRENT, UpdatePhase.CHECK_FAILED)) check()
+    }
+
+    fun closeDialog() {
+        _dialogVisible.value = false
+    }
+
+    fun check() = check(announce = false)
+
+    private fun check(announce: Boolean) {
         if (job?.isActive == true) return
         job = scope.launch {
             _state.value = AppUpdateState(UpdatePhase.CHECKING)
             try {
                 val now = android.os.SystemClock.elapsedRealtime()
-                val release = cached?.takeIf { now - checkedAt < 300_000 } ?: service.latest().also {
+                val release = cached?.takeIf { now - checkedAt < 300_000 } ?: latestRelease().also {
                     cached = it
                     checkedAt = now
                 }
@@ -49,6 +75,7 @@ class AppUpdateManager(private val context: Context, private val scope: Coroutin
                 } else {
                     val asset = service.androidAsset(release, Build.SUPPORTED_ABIS.toList())
                     _state.value = AppUpdateState(UpdatePhase.AVAILABLE, release, asset.size)
+                    if (announce && !manualDialogOpened) _dialogVisible.value = true
                 }
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { _state.value = AppUpdateState(UpdatePhase.CHECK_FAILED, message = e.message ?: "读取更新信息失败，请重试") }

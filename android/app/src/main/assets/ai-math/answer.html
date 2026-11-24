@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src file: 'unsafe-inline'; style-src file: 'unsafe-inline'; font-src file:">
+  <link rel="stylesheet" href="katex.min.css">
+  <script src="katex.min.js"></script>
+  <script src="contrib/auto-render.min.js"></script>
+  <style>
+    html, body { margin: 0; padding: 0; }
+    #answer { font-family: sans-serif; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .katex { font-size: 1.12em; white-space: normal; }
+    .katex-display { margin: 0.4em 0; padding: 0.2em 0; overflow-x: auto; overflow-y: hidden; }
+  </style>
+</head>
+<body><div id="answer"></div>
+<script>
+  const options = {trust: false, strict: 'ignore', maxExpand: 100, maxSize: 20};
+  const scriptToken = /[A-Za-zΑ-ω0-9)\]}]\s*[_^]\s*(?:\{[^{}\r\n]+\}|[A-Za-zΑ-ω0-9])/;
+  // Only try undelimited notation in math-like runs. Keep operators and slash grouping as written.
+  const runs = /[A-Za-zΑ-ω0-9 ∑∏∫√∞±×÷·−≤≥≠≈∂∆=+\-/*(){}\[\]^_.<>|]+/g;
+  function renderLegacy(node) {
+    const text = node.textContent;
+    const out = document.createDocumentFragment();
+    let start = 0;
+    for (const match of text.matchAll(runs)) {
+      const raw = match[0];
+      const expression = raw.trim();
+      if (!scriptToken.test(expression) || /[A-Za-z]{2,}/.test(expression)) continue;
+      const math = document.createElement('span');
+      try { katex.render(expression, math, options); } catch (_) { continue; }
+      out.append(text.slice(start, match.index), raw.slice(0, raw.indexOf(expression)), math,
+        raw.slice(raw.indexOf(expression) + expression.length));
+      start = match.index + raw.length;
+    }
+    if (start) {
+      out.append(text.slice(start));
+      node.replaceWith(out);
+    }
+  }
+
+  window.showExplanation = (text, color, fontSize) => {
+    const answer = document.getElementById('answer');
+    answer.style.color = color;
+    answer.style.fontSize = fontSize + 'px';
+    answer.textContent = text;
+    if (typeof renderMathInElement === 'function') {
+      renderMathInElement(answer, {...options, errorCallback: () => {}, delimiters: [
+        {left: '$$', right: '$$', display: true},
+        {left: '\\[', right: '\\]', display: true},
+        {left: '\\(', right: '\\)', display: false},
+        {left: '$', right: '$', display: false},
+      ]});
+      for (const node of Array.from(answer.childNodes)) {
+        if (node.nodeType !== Node.TEXT_NODE) continue;
+        if (node.previousSibling?.querySelector?.('.katex-display')) {
+          node.textContent = node.textContent.replace(/^[ \t]*\r?\n/, '');
+        }
+        if (node.nextSibling?.querySelector?.('.katex-display')) {
+          node.textContent = node.textContent.replace(/\r?\n[ \t]*$/, '');
+        }
+        renderLegacy(node);
+      }
+    }
+    return Math.ceil(answer.getBoundingClientRect().height);
+  };
+</script>
+</body>
+</html>
