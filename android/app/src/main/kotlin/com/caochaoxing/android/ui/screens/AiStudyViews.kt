@@ -2,12 +2,14 @@
 package com.caochaoxing.android.ui.screens
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.layout.LocalPinnableContainer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
@@ -83,40 +85,57 @@ internal fun AiDraftSheet(id: String, title: String, questions: List<AiQuestion>
     val controller = CaochaoxingApp.from(LocalContext.current).aiStudyController
     val drafts by controller.drafts.collectAsState()
     val draft = drafts[id]
+    val shownQuestions = questions ?: draft?.questions.orEmpty()
+    val matchingDraft = draft?.takeIf { it.questions.isEmpty() || it.questions == shownQuestions }
     var showPreview by remember(id) { mutableStateOf(false) }
-    if (showPreview) AiQuestionPreview(questions ?: draft?.questions.orEmpty()) { showPreview = false }
+    if (showPreview) AiQuestionPreview(shownQuestions) { showPreview = false }
     val clipboard = LocalClipboardManager.current
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.fillMaxWidth().fillMaxHeight(0.9f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("AI 作答", style = MaterialTheme.typography.titleLarge)
-            Text(title, style = MaterialTheme.typography.titleMedium)
-            AiSettingsCard()
-            if (readError.isNotBlank()) Text(readError, color = CxPalette.cinnabar)
-            if (readWarning.isNotBlank()) Text(readWarning, style = MaterialTheme.typography.bodyMedium)
-            if (questions != null && questions.isNotEmpty() && readWarning.isBlank()) Text("已识别 ${questions.size} 道题", style = MaterialTheme.typography.bodyMedium)
-            if (!questions.isNullOrEmpty() || draft?.questions?.isNotEmpty() == true) TextButton(onClick = { showPreview = true }) { Text("查看识别内容") }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { controller.generate(id, title, questions) }, enabled = draft?.running != true && readError.isBlank()) { Text("生成答案") }
-                if (draft?.running == true) TextButton(onClick = { controller.cancel(id) }) { Text("停止") }
+        LazyColumn(Modifier.fillMaxWidth().fillMaxHeight(0.9f), contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            item(key = "controls") {
+                // 保留滚出屏幕的表单，包括尚未保存的 Key，且不写入保存状态。
+                val pin = LocalPinnableContainer.current
+                DisposableEffect(pin) {
+                    val handle = pin?.pin()
+                    onDispose { handle?.release() }
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("AI 作答", style = MaterialTheme.typography.titleLarge)
+                    Text(title, style = MaterialTheme.typography.titleMedium)
+                    AiSettingsCard()
+                    if (readError.isNotBlank()) Text(readError, color = CxPalette.cinnabar)
+                    if (readWarning.isNotBlank()) Text(readWarning, style = MaterialTheme.typography.bodyMedium)
+                    if (questions != null && questions.isNotEmpty() && readWarning.isBlank()) Text("已识别 ${questions.size} 道题", style = MaterialTheme.typography.bodyMedium)
+                    if (shownQuestions.isNotEmpty()) TextButton(onClick = { showPreview = true }) { Text("查看识别内容") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { controller.generate(id, title, questions) }, enabled = draft?.running != true && readError.isBlank()) { Text("生成答案") }
+                        if (draft?.running == true) TextButton(onClick = { controller.cancel(id) }) { Text("停止") }
+                    }
+                    matchingDraft?.let {
+                        if (it.running) LinearProgressIndicator(Modifier.fillMaxWidth())
+                        Text("${it.message}  ${it.answers.size} / ${it.questions.size}")
+                    }
+                }
             }
-            draft?.let {
-                if (it.running) LinearProgressIndicator(Modifier.fillMaxWidth())
-                Text("${it.message}  ${it.answers.size} / ${it.questions.size}")
-                it.questions.forEachIndexed { index, question ->
-                    AiQuestionCard(question, index + 1, showImages = false) {
-                        if (it.answers[question.id] != null || it.errors[question.id] != null) HorizontalDivider(color = CxPalette.border)
-                        it.answers[question.id]?.let { answer ->
-                            var edited by remember(id, question.id, answer) { mutableStateOf(answer.answer) }
+            itemsIndexed(shownQuestions, key = { _, question -> "question:${question.id}" }) { index, question ->
+                val result = matchingDraft?.takeIf { it.questions.isNotEmpty() }
+                AiQuestionCard(question, index + 1, footer = result?.let { current ->
+                    {
+                        val answer = current.answers[question.id]
+                        val error = current.errors[question.id]
+                        if (answer != null || error != null) HorizontalDivider(color = CxPalette.border)
+                        if (answer != null) key(id, answer) {
+                            var edited by rememberSaveable { mutableStateOf(answer.answer) }
                             OutlinedTextField(edited, { edited = it }, label = { Text("建议答案") }, modifier = Modifier.fillMaxWidth())
                             Text(answer.explanation)
                             TextButton(onClick = { clipboard.setText(AnnotatedString(edited)) }) { Text("复制答案") }
                         }
-                        it.errors[question.id]?.let { error -> Text(error, color = CxPalette.cinnabar) }
-                        TextButton(onClick = { controller.generate(id, title, it.questions, retryId = question.id) }, enabled = !it.running) { Text("重试本题") }
+                        if (error != null) Text(error, color = CxPalette.cinnabar)
+                        TextButton(onClick = { controller.generate(id, title, current.questions, retryId = question.id) }, enabled = !current.running) { Text("重试本题") }
                     }
-                }
+                })
             }
-            Spacer(Modifier.height(24.dp))
         }
     }
 }
