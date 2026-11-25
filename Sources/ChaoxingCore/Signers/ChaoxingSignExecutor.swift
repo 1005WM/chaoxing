@@ -16,6 +16,10 @@ public enum ChaoxingSignExecutor {
     private static let checkSignCodeBase = "https://mobilelearn.chaoxing.com/widget/sign/pcStuSignController/checkSignCode"
 
     private static let signedStatuses: Set<Int> = [1, 2, 3, 9]
+    // 上游 ChaoxingLocationSigner.notSignedPageMarkers：新版已签到页面文案。
+    private static let alreadySignedPageMarkers = [
+        "恭喜你已完成签", "已完成签到", "您已签到", "已经签到过了"
+    ]
 
     public static func preSignURL(client: ChaoxingHTTPClient, activity: ChaoxingSignActivity) -> URL {
         var components = URLComponents(string: preSignBase)!
@@ -62,13 +66,12 @@ public enum ChaoxingSignExecutor {
         if let status = attendanceStatus(in: body) {
             if signedStatuses.contains(status) { return .alreadySigned }
             guard status == 0 else { throw ChaoxingError.parseFailed("无法确认预签到状态") }
-        } else {
-            // Accept an actual activity form, never an arbitrary successful HTTP document.
-            let marker = #"(?:id|name)\s*=\s*["']activePrimaryId["']"#
-            guard body.range(of: marker, options: .regularExpression) != nil else {
-                throw ChaoxingError.parseFailed("预签到响应不是可识别的活动页面")
-            }
+        } else if Self.alreadySignedPageMarkers.contains(where: { body.contains($0) }) {
+            return .alreadySigned
         }
+        // 新版签到（含学习通新发布的“定位签到”）的预签到响应可能不再带
+        // activePrimaryId / primaryAttend 等旧标记。与上游 ChaoxingSigner 一致，
+        // 通过登录态、无权限、截止检查后一律按可签到处理，最终状态由签到接口确认。
         try? await postAnalysis(client: client, activeId: activity.id)
         try Task.checkCancellation()
         return .readyToSign

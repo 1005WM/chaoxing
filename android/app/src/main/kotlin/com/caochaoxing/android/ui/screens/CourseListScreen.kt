@@ -244,23 +244,25 @@ fun CourseListScreen(
                 .padding(innerPadding)
                 .consumeWindowInsets(innerPadding),
         ) {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 16.dp),
-            ) {
+            // 作业待办入口固定在列表之外的顶部，不随 LazyColumn 滚动。
+            // 主页被 SaveableStateProvider 包裹，LazyColumn 会恢复上次的滚动位置；
+            // 若把入口放在列表内，用户上次下滑后再打开就会被滚出视口，需要手动划回来。
+            Column(Modifier.fillMaxSize()) {
                 if (uiState.courses.isNotEmpty()) {
-                    item(key = "pending_homework") {
-                        val loadedOverview = overviewState?.takeIf { it.hasLoadedAny }
-                        // 与「作业待办」页保持一致：统计未完成作业 + 未完成考试，不能只算作业。
-                        PendingHomeworkEntry(
-                            count = loadedOverview?.totalPending,
-                            overdueCount = loadedOverview?.overdueWorkCount(System.currentTimeMillis()),
-                            onOpen = onOpenTodo,
-                            modifier = Modifier.padding(bottom = 14.dp),
-                        )
-                    }
+                    val loadedOverview = overviewState?.takeIf { it.hasLoadedAny }
+                    // 与「作业待办」页保持一致：统计未完成作业 + 未完成考试，不能只算作业。
+                    PendingHomeworkEntry(
+                        count = loadedOverview?.totalPending,
+                        overdueCount = loadedOverview?.overdueWorkCount(System.currentTimeMillis()),
+                        onOpen = onOpenTodo,
+                        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 14.dp),
+                    )
                 }
 
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 0.dp, bottom = 16.dp),
+                ) {
                 if (studyState != null && studyState.isWatching) {
                     item(key = "active_study_banner") {
                         Row(
@@ -506,6 +508,7 @@ fun CourseListScreen(
                             if (!last) HorizontalDivider(color = CxPalette.border, thickness = Dp.Hairline)
                         }
                     }
+                }
                 }
             }
         }

@@ -47,8 +47,14 @@ object ChaoxingSignExecutor {
     )
     private val PRIMARY_ATTEND_STATUS_REGEX = Regex(""""primaryAttend"\s*:\s*\{[^{}]*?"status"\s*:\s*(\d+)""")
     private val SIGN_STATUS_REGEX = Regex("""signstatus\s*=\s*(\d+)""")
-    private val ACTIVE_PRIMARY_ID_MARKER_REGEX = Regex("""(?:id|name)\s*=\s*["']activePrimaryId["']""")
     private val ANALYSIS_CODE_REGEX = Regex("""code='\+'([a-f0-9]+)'""")
+    // 上游 ChaoxingLocationSigner.notSignedPageMarkers：新版已签到页面文案。
+    private val ALREADY_SIGNED_PAGE_MARKERS = listOf(
+        "恭喜你已完成签",
+        "已完成签到",
+        "您已签到",
+        "已经签到过了",
+    )
 
     fun preSignUrl(client: ChaoxingHttpClient, activity: ChaoxingSignActivity): String =
         preSignUrl(ChaoxingEndpoints.PRODUCTION, client, activity)
@@ -125,10 +131,13 @@ object ChaoxingSignExecutor {
             if (status != 0) {
                 throw ChaoxingError.ParseFailed("无法确认预签到状态")
             }
-        } else if (!ACTIVE_PRIMARY_ID_MARKER_REGEX.containsMatchIn(body)) {
-            // Accept an actual activity form, never an arbitrary successful HTTP document.
-            throw ChaoxingError.ParseFailed("预签到响应不是可识别的活动页面")
+        } else if (isAlreadySignedPage(body)) {
+            return ChaoxingSignActivityStatus.ALREADY_SIGNED
         }
+        // 新版签到（含学习通新发布的“定位签到”）的预签到响应可能不再带
+        // activePrimaryId / primaryAttend 等旧标记。上游 ChaoxingSigner 对
+        // 这类响应一律按“未签到”处理，由后续签到接口给出最终状态。
+        // 这里不再因为缺少旧标记而拒绝，以免误判新活动页面。
 
         try {
             postAnalysis(endpoints, client, activeId = activity.id)
@@ -157,6 +166,9 @@ object ChaoxingSignExecutor {
         }
         return null
     }
+
+    private fun isAlreadySignedPage(body: String): Boolean =
+        ALREADY_SIGNED_PAGE_MARKERS.any { body.contains(it) }
 
     private suspend fun postAnalysis(
         endpoints: ChaoxingEndpoints,

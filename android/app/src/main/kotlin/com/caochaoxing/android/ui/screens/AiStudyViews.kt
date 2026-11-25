@@ -83,7 +83,8 @@ internal fun AiSettingsCard() {
 }
 
 @Composable
-internal fun AiDraftSheet(id: String, title: String, questions: List<AiQuestion>?, readError: String = "", readWarning: String = "", onDismiss: () -> Unit) {
+internal fun AiDraftSheet(id: String, title: String, questions: List<AiQuestion>?, readError: String = "", readWarning: String = "",
+    onApply: ((Int, String) -> Unit)? = null, onDismiss: () -> Unit) {
     val controller = CaochaoxingApp.from(LocalContext.current).aiStudyController
     val drafts by controller.drafts.collectAsState()
     val draft = drafts[id]
@@ -128,7 +129,9 @@ internal fun AiDraftSheet(id: String, title: String, questions: List<AiQuestion>
                         val error = current.errors[question.id]
                         if (answer != null || error != null) HorizontalDivider(color = CxPalette.border)
                         if (answer != null) key(id, answer) {
-                            AiAnswerContent(answer) { clipboard.setText(AnnotatedString(it)) }
+                            AiAnswerContent(answer,
+                                onCopy = { clipboard.setText(AnnotatedString(it)) },
+                                onApply = onApply?.let { apply -> { text -> apply(index, text) } })
                         }
                         if (error != null) Text(error, color = CxPalette.cinnabar)
                         TextButton(onClick = { controller.generate(id, title, current.questions, retryId = question.id) }, enabled = !current.running) { Text("重试本题") }
@@ -140,7 +143,7 @@ internal fun AiDraftSheet(id: String, title: String, questions: List<AiQuestion>
 }
 
 @Composable
-internal fun AiAnswerContent(answer: AiAnswer, onCopy: (String) -> Unit) {
+internal fun AiAnswerContent(answer: AiAnswer, onCopy: (String) -> Unit, onApply: ((String) -> Unit)? = null) {
     if (answer.notice.isNotBlank()) Text(answer.notice, color = CxPalette.inkSecondary, style = MaterialTheme.typography.bodyMedium)
     if (answer.answer.isBlank()) {
         Text("模型原始回复", style = MaterialTheme.typography.titleMedium)
@@ -149,9 +152,19 @@ internal fun AiAnswerContent(answer: AiAnswer, onCopy: (String) -> Unit) {
         return
     }
     var edited by rememberSaveable { mutableStateOf(answer.answer) }
+    var appliedMessage by remember(answer.answer) { mutableStateOf("") }
     OutlinedTextField(edited, { edited = it }, label = { Text("建议答案") }, modifier = Modifier.fillMaxWidth())
     if (answer.explanation.isNotBlank()) AiMathExplanation(answer.explanation)
-    TextButton(onClick = { onCopy(edited) }) { Text("复制答案") }
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+        TextButton(onClick = { onCopy(edited) }) { Text("复制答案") }
+        if (onApply != null) {
+            Button(onClick = {
+                onApply(edited)
+                appliedMessage = "已提交回填，请核对页面"
+            }) { Text("回填到题目") }
+        }
+    }
+    if (appliedMessage.isNotBlank()) Text(appliedMessage, color = CxPalette.inkSecondary, style = MaterialTheme.typography.bodySmall)
 }
 
 @Composable

@@ -365,7 +365,14 @@ fun AssessmentWebScreen(
         webView.loadUrl(target)
     }
 
-    if (showAi) AiDraftSheet(aiPageUrl, title, aiQuestions, readError = aiReadError, readWarning = aiReadWarning) { showAi = false }
+    if (showAi) AiDraftSheet(aiPageUrl, title, aiQuestions, readError = aiReadError, readWarning = aiReadWarning,
+        onApply = { index, answer ->
+            val script = aiController.applyAnswerScript(index, answer)
+            webView.evaluateJavascript(script) { raw ->
+                val result = aiController.parseApplyResult(raw)
+                Toast.makeText(context, result.message, Toast.LENGTH_SHORT).show()
+            }
+        }) { showAi = false }
 
     BackHandler(enabled = canGoBack && !showAi) {
         if (webView.canGoBack()) {

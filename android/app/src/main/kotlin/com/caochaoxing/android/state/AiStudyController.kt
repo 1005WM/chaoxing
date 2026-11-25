@@ -13,6 +13,10 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 
 @Serializable
 data class AiConfig(val url: String = "", val key: String = "", val model: String = "", val followStudy: Boolean = false)
@@ -106,6 +110,133 @@ internal val EXTRACT_AI_QUESTIONS = """
 """.replace("// AI_DOM_MEDIA", AI_DOM_MEDIA)
 
 internal val COUNT_AI_QUESTIONS = EXTRACT_AI_QUESTIONS.replace("var captureMedia=true;", "var captureMedia=false;")
+
+/**
+ * 答案回填脚本：把 AI 答案写回题目对应的选项或填空框。
+ * 题目节点定位与 EXTRACT_AI_QUESTIONS 完全同源（相同选择器 + 相同排序），
+ * 因此第 index 个节点精确对应读题时第 index 道题；跨页面题目由调用方按所属 frame 传入。
+ * 参数占位：__INDEX__ 为题目序号，__ANSWER__ 为 JSON 转义后的答案字符串。
+ * 返回一个 JSON 字符串：{ok:数量, choice:数量, fill:数量, skipped:数量, detail:[...]}。
+ */
+internal val APPLY_AI_ANSWER_JS = """
+(function(){
+ var index=__INDEX__;
+ var answer=__ANSWER__;
+ var out={ok:0,choice:0,fill:0,skipped:0,detail:[]};
+ function nodesOf(doc,all,depth){
+   if(depth>6)return;
+   var strong='.singleQuesId,.questionLi[data],[data-question-id]';
+   var generic='.TiMu,.questionLi,.question-item,.questionItem';
+   var headings='.Zy_TItle,.mark_name,.question-title,.questionTitle';
+   var types='input[name^="type"],input[id^="type"],input[id^="answertype"]';
+   var nodes=Array.from(doc.querySelectorAll(strong));
+   nodes=nodes.filter(function(e){return !e.querySelector(strong);});
+   Array.from(doc.querySelectorAll(generic)).forEach(function(e){
+     if(e.matches(strong)||e.closest(strong)||e.querySelector(strong))return;
+     if(e.querySelector(generic))return;
+     nodes.push(e);
+   });
+   Array.from(doc.querySelectorAll(headings+','+types)).forEach(function(title){
+     if(nodes.some(function(e){return e.contains(title);}))return;
+     var node=title.closest(strong+','+generic);
+     if(!node){
+       node=title.parentElement;
+       var marker=title.matches('input')?types:headings;
+       while(node&&node.parentElement&&node.parentElement!==doc.body&&node.parentElement.querySelectorAll(marker).length===1)node=node.parentElement;
+     }
+     if(node&&node!==doc.body&&nodes.indexOf(node)<0)nodes.push(node);
+   });
+   nodes.sort(function(a,b){return a===b?0:(a.compareDocumentPosition(b)&4?-1:1);});
+   nodes=Array.from(new Set(nodes)).filter(function(node){
+     var text=(node.innerText||'').replace(/\s/g,'');
+     var hasChoice=node.querySelector('.Zy_ulTop li,.answerList li,.question-options li,.answerBg li,label,[contenteditable="true"],textarea,input[type="text"]');
+     return text.length>0||hasChoice;
+   });
+   nodes.forEach(function(node){all.push({node:node,doc:doc});});
+   Array.from(doc.querySelectorAll('iframe')).forEach(function(frame){try{if(frame.contentDocument&&frame.contentDocument.body)nodesOf(frame.contentDocument,all,depth+1);}catch(e){}});
+ }
+ var all=[];
+ var cache=window.__cxAiQuestionNodes;
+ var cached=cache?Object.keys(cache).filter(function(k){return /^q\d+$/.test(k);})
+   .sort(function(a,b){return parseInt(a.slice(1))-parseInt(b.slice(1));})
+   .map(function(k){return {node:cache[k].node,doc:cache[k].doc};})
+   .filter(function(x){return x.node&&x.node.isConnected;}):[];
+ if(cached.length)all=cached; else nodesOf(document,all,0);
+ if(index<0||index>=all.length){out.detail.push('题目序号'+index+'不存在，共'+all.length+'题（页面已刷新请重新读题）');return JSON.stringify(out);}
+ var item=all[index];var node=item.node;var doc=item.doc||node.ownerDocument;
+ var win=doc.defaultView||window;
+ function fire(el,types){types.forEach(function(t){try{el.dispatchEvent(new win.Event(t,{bubbles:true}));}catch(e){try{el.dispatchEvent(new Event(t,{bubbles:true}));}catch(_){}}});}
+ function setText(el,value){
+   try{
+     if(el.matches('textarea,input[type="text"],input:not([type])')){
+       var proto=el.tagName==='TEXTAREA'?win.HTMLTextAreaElement.prototype:win.HTMLInputElement.prototype;
+       Object.getOwnPropertyDescriptor(proto,'value').set.call(el,value);
+     }else if(el.isContentEditable){el.textContent=value;}
+     else if(el.matches('iframe')){try{var bd=el.contentDocument&&el.contentDocument.body;if(bd)bd.innerHTML=value;}catch(e){return false;}}
+     else{el.textContent=value;}
+     fire(el,['input','change','blur','keyup']);return true;
+   }catch(e){return false;}
+ }
+ var letters=String(answer).toUpperCase().replace(/[^A-Z]/g,'');
+ var isChoice=/^[A-Z]+$/.test(String(answer).trim().toUpperCase());
+ var sel='.Zy_ulTop li, .answerList li, .question-options li, .answerBg li, ul.mark_letter > li.workTextWrap, .mark_letter > li, label, [mark_letter], .answer_p, .mark_name + ul li';
+ var choices=Array.from(node.querySelectorAll(sel));
+ choices=choices.filter(function(e){return !choices.some(function(o){return o!==e&&o.contains(e);});});
+ if(!choices.length)choices=Array.from(node.querySelectorAll('li')).filter(function(e){return e.querySelector('input')||/\b[A-D][.、．]/.test(e.innerText||'');});
+ choices=choices.filter(function(e){var t=(e.innerText||'').trim();return t.length>0||e.querySelector('input,img,svg');});
+ var clickTarget=function(li){
+   var input=li.querySelector('input[type=radio],input[type=checkbox]');
+   if(input){
+     if(input.checked)return true; // 已选中，避免多选被反选
+     try{input.click();}catch(e){try{li.click();}catch(_){}}
+   }else{
+     var marked=(li.className||'').indexOf('active')>=0||li.getAttribute('aria-checked')==='true';
+     if(marked)return true;
+     try{li.click();}catch(_){}
+   }
+   return true;
+ };
+ function judgeByMeaning(text){
+   var v=String(text).trim();
+   var yes=/^(正确|对|是|√|✓|true|t|yes)$/i.test(v);
+   var no=/^(错误|错|否|×|✗|false|f|no)$/i.test(v);
+   if(!yes&&!no)return -1;
+   for(var i=0;i<choices.length;i++){var m=/^(正确|对|是|√|✓|true|t|yes)$/i.test((choices[i].innerText||'').trim())?1:(/^(错误|错|否|×|✗|false|f|no)$/i.test((choices[i].innerText||'').trim())?0:-1);if(m===(yes?1:0))return i;}
+   return yes?0:(no?1:-1);
+ }
+ var typeText=node.querySelector('.mark_type,.question-type,.type_tit')?(node.querySelector('.mark_type,.question-type,.type_tit').innerText||''):'';
+ var isJudge=/判断/.test(typeText)||choices.length===2&&choices.every(function(c){return judgeByMeaning(c.innerText)!==-1;});
+ var applied=false;
+ if(choices.length&&(isChoice||isJudge)){
+   var indexes=[];
+   if(isJudge&&!isChoice){var j=judgeByMeaning(answer);if(j>=0)indexes=[j];}
+   else{letters.split('').forEach(function(ch){var i=ch.charCodeAt(0)-65;if(i>=0&&i<choices.length)indexes.push(i);});}
+   indexes=indexes.filter(function(v,i,a){return a.indexOf(v)===i;});
+   indexes.forEach(function(i){if(clickTarget(choices[i])){out.choice++;applied=true;out.detail.push('选项'+(String.fromCharCode(65+i)));}});
+   var withInput=indexes.filter(function(i){return !!choices[i].querySelector('input[type=radio],input[type=checkbox]');});
+   var confirmed=withInput.filter(function(i){return choices[i].querySelector('input').checked;});
+   if(withInput.length>0&&confirmed.length===0){
+     out.skipped+=withInput.length;out.choice=0;applied=false;out.detail.push('选项点击后未生效');
+   }
+ }
+ if(!applied){
+   var parts=String(answer).split(/[\n,，、;；|]+/).map(function(s){return s.trim();}).filter(function(s){return s.length>0;});
+   var editors=[];
+   Array.from(node.querySelectorAll('textarea,[contenteditable="true"],input[type="text"],input:not([type][value])')).forEach(function(e){if(e.offsetParent!==null||e.matches('[contenteditable="true"]'))editors.push(e);});
+   Array.from(node.querySelectorAll('iframe')).forEach(function(f){try{if(f.contentDocument&&f.contentDocument.body&&f.contentDocument.body.isContentEditable)editors.push(f);}catch(e){}});
+   editors=editors.filter(function(e,i,a){return a.indexOf(e)===i;});
+   if(editors.length){
+     if(editors.length===1)setText(editors[0],String(answer));
+     else parts.forEach(function(p,i){if(i<editors.length&&setText(editors[i],p))out.fill++;});
+     if(editors.length===1)out.fill=1;
+     applied=out.fill>0;
+     out.detail.push('填空'+out.fill+'处');
+   }
+ }
+ out.ok=applied?1:0;
+ return JSON.stringify(out);
+})();
+"""
 
 class AiStudyController(private val context: Context, private val appState: AndroidAppState, private val scope: CoroutineScope) {
     private val json = Json { ignoreUnknownKeys = true }
@@ -224,5 +355,44 @@ class AiStudyController(private val context: Context, private val appState: Andr
 
     suspend fun readPage(view: WebView): AiQuestionPage = pageReader.fromView(view)
 
+    fun applyAnswerScript(index: Int, answer: String): String = buildApplyAnswerScript(index, answer)
+
+    fun parseApplyResult(raw: String?): ApplyResult = parseAiApplyResult(raw)
+
     private suspend fun readQuestions(url: String): List<AiQuestion> = pageReader.fromUrl(url).questions
+}
+
+/** 生成把答案写回第 [index] 道题的 JS。答案用 JSON 编码，避免引号/换行破坏脚本。 */
+internal fun buildApplyAnswerScript(index: Int, answer: String): String {
+    val encoded = Json.Default.encodeToString(answer)
+    return APPLY_AI_ANSWER_JS.replace("__INDEX__", index.toString()).replace("__ANSWER__", encoded)
+}
+
+/** 解析回填脚本返回的 JSON，Fail-safe：解析失败视为未成功。 */
+internal fun parseAiApplyResult(raw: String?): ApplyResult {
+    val body = raw?.trim()?.removeSurrounding("\"")
+        ?.replace("\\\"", "\"")?.replace("\\\\", "\\") ?: return ApplyResult(false)
+    val obj = runCatching { Json.Default.parseToJsonElement(body) as? JsonObject }.getOrNull() ?: return ApplyResult(false)
+    val ok = (obj["ok"] as? JsonPrimitive)?.let { it.booleanOrNull ?: (it.contentOrNull?.toIntOrNull() == 1) } ?: false
+    val choice = (obj["choice"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0
+    val fill = (obj["fill"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0
+    val skipped = (obj["skipped"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0
+    val detail = (obj["detail"] as? kotlinx.serialization.json.JsonArray)
+        ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList()
+    return ApplyResult(ok, choice, fill, skipped, detail)
+}
+
+/** 单题回填结果。ok 表示是否真的写入了控件；choice/fill 为写入数量。 */
+data class ApplyResult(
+    val ok: Boolean = false,
+    val choice: Int = 0,
+    val fill: Int = 0,
+    val skipped: Int = 0,
+    val detail: List<String> = emptyList(),
+) {
+    val message: String get() = when {
+        ok && fill > 0 -> "已填入 $fill 处填空"
+        ok && choice > 0 -> "已勾选 ${choice} 个选项"
+        else -> "未能回填：" + (detail.firstOrNull() ?: "题目无可写入的控件")
+    }
 }

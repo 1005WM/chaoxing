@@ -79,14 +79,27 @@ extension ProtocolRegressionTests {
         #expect(ProtocolMockURLProtocol.store.requests.isEmpty)
     }
 
-    @Test("Unknown or login pre-sign documents never become ready")
+    @Test("Login and no-permission pre-sign documents still fail; new-format pages are accepted")
     func preSignDocuments() async {
-        for body in ["", "<html><title>请登录</title></html>", "<html>maintenance</html>"] {
+        // 登录页触发重登后仍失败，无权限页直接拒绝。
+        for body in ["<html><title>请登录</title></html>", "校验失败，未查询到活动数据"] {
             let c = client(body: body)
             await #expect(throws: ChaoxingError.self) { try await ChaoxingSignExecutor.preSign(client: c, activity: Self.activity) }
         }
+        // 新版定位签到的响应没有 activePrimaryId / primaryAttend 旧标记，仍应可签到。
+        // 与上游 ChaoxingSigner 一致，由后续签到接口确认最终状态。
+        for body in ["", "<html>maintenance</html>", #"{"result":1,"activeId":101,"ifopenAddress":1}"#] {
+            let c = client(body: body)
+            #expect((try? await ChaoxingSignExecutor.preSign(client: c, activity: Self.activity)) == .readyToSign)
+        }
         let c = client(body: "<script>var signstatus=0;</script>")
         #expect((try? await ChaoxingSignExecutor.preSign(client: c, activity: Self.activity)) == .readyToSign)
+    }
+
+    @Test("New already-signed page text is recognized")
+    func preSignAlreadySignedText() async {
+        let c = client(body: "<html>恭喜你已完成签</html>")
+        #expect((try? await ChaoxingSignExecutor.preSign(client: c, activity: Self.activity)) == .alreadySigned)
     }
 
     @Test("QR availability remains unknown on HTTP or incomplete JSON errors")

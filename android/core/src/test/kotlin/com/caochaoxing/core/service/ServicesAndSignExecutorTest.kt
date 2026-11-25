@@ -265,13 +265,15 @@ class ServicesAndSignExecutorTest {
     }
 
     @Test
-    fun `preSign handles alreadySigned expired noPermission invalidHtml and double-401 sessionExpired`() = runBlocking {
+    fun `preSign handles alreadySigned expired noPermission unrecognizedPage and double-401 sessionExpired`() = runBlocking {
         withServer(
             handler = { req ->
                 when (req.requestUrl?.queryParameter("activePrimaryId")) {
                     "1" -> MockResponse().setBody("""{"primaryAttend":{"status":1}}""")
                     "2" -> MockResponse().setBody("<html>下次早点哦</html>")
                     "3" -> MockResponse().setBody("校验失败，未查询到活动数据")
+                    // 新版定位签到的预签到响应可能没有 activePrimaryId / primaryAttend 旧标记，
+                    // 仍应视为可签到，由后续签到接口确认最终状态。
                     "4" -> MockResponse().setBody("<html>maintenance</html>")
                     else -> MockResponse().setResponseCode(401)
                 }
@@ -290,13 +292,58 @@ class ServicesAndSignExecutorTest {
                 assertSuspendsThrows<ChaoxingError.NoPermission> {
                     ChaoxingSignExecutor.preSign(endpoints, client, syntheticActivity(id = 3L))
                 }
-                assertSuspendsThrows<ChaoxingError.ParseFailed> {
-                    ChaoxingSignExecutor.preSign(endpoints, client, syntheticActivity(id = 4L))
-                }
+                // 缺少旧标记不再抛“预签到响应不是可识别的活动页面”。
+                assertEquals(
+                    ChaoxingSignActivityStatus.READY_TO_SIGN,
+                    ChaoxingSignExecutor.preSign(endpoints, client, syntheticActivity(id = 4L)),
+                )
                 // activePrimaryId=5 returns 401 -> reLogin fails because /fanyalogin also returns 401 -> NetworkError
                 assertSuspendsThrows<ChaoxingError.NetworkError> {
                     ChaoxingSignExecutor.preSign(endpoints, client, syntheticActivity(id = 5L))
                 }
+            } finally {
+                client.invalidate()
+            }
+        }
+    }
+
+    @Test
+    fun `preSign accepts new location sign-in page formats without legacy markers`() = runBlocking {
+        val bodies = listOf(
+            // 新版定位签到常见：只带签到与位置字段、没有 activePrimaryId 表单标记
+            """{"result":1,"activeId":9001,"ifopenAddress":1,"locationLatitude":36.31,"locationLongitude":120.51}""",
+            """<html><body>位置签到</body></html>""",
+            """{"data":{"activeId":9001,"status":0}}""",
+        )
+        val index = java.util.concurrent.atomic.AtomicInteger(0)
+        withServer(
+            handler = { _ -> MockResponse().setBody(bodies[index.getAndIncrement() % bodies.size]) },
+        ) { _, endpoints, _ ->
+            val client = ChaoxingHttpClient.createForLoopbackTesting(syntheticSession())
+            try {
+                bodies.forEach { _ ->
+                    assertEquals(
+                        ChaoxingSignActivityStatus.READY_TO_SIGN,
+                        ChaoxingSignExecutor.preSign(endpoints, client, syntheticActivity(id = 9001L)),
+                    )
+                }
+            } finally {
+                client.invalidate()
+            }
+        }
+    }
+
+    @Test
+    fun `preSign treats new already-signed page text as alreadySigned`() = runBlocking {
+        withServer(
+            handler = { _ -> MockResponse().setBody("<html>恭喜你已完成签</html>") },
+        ) { _, endpoints, _ ->
+            val client = ChaoxingHttpClient.createForLoopbackTesting(syntheticSession())
+            try {
+                assertEquals(
+                    ChaoxingSignActivityStatus.ALREADY_SIGNED,
+                    ChaoxingSignExecutor.preSign(endpoints, client, syntheticActivity(id = 9001L)),
+                )
             } finally {
                 client.invalidate()
             }
