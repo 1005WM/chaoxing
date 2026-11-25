@@ -182,6 +182,7 @@ fun SettingsScreen(
                         color = CxPalette.ink,
                     )
                 },
+                actions = { AppUpdateButton() },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = CxPalette.canvas,
                     titleContentColor = CxPalette.ink,

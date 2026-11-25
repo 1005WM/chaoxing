@@ -140,6 +140,7 @@ fun AssessmentWebScreen(
 ) {
     val context = LocalContext.current
     val hasMobileVariant = !mobileUrl.isNullOrBlank() && mobileUrl != url && !isDesktopAssessmentUrl(mobileUrl)
+    val opensHomework = remember(url) { isHomeworkDetailUrl(url) }
     var desktopMode by remember(url) { mutableStateOf(isDesktopAssessmentUrl(url)) }
     val currentDesktopMode by rememberUpdatedState(desktopMode)
     val currentDesktopCourseFallback by rememberUpdatedState(remember(url) { desktopAssessmentCourseFallback(url) })
@@ -174,8 +175,27 @@ fun AssessmentWebScreen(
         return true
     }
 
-    fun blockNavigation(view: WebView, target: String): Boolean {
-        if (!currentDesktopMode || !isMobileHomeworkUrl(target)) return !isAllowedAssessmentUrl(target)
+    fun recoverHomework(message: String) {
+        if (currentDesktopMode && hasMobileVariant) {
+            desktopMode = false
+        } else {
+            errorMessage = message
+            isLoading = false
+        }
+    }
+
+    fun blockNavigation(view: WebView, request: WebResourceRequest): Boolean {
+        val target = request.url.toString()
+        if (!isAllowedAssessmentUrl(target)) return true
+        if (opensHomework && !request.hasGesture() && (isCourseStudyUrl(target) || isHomeworkListUrl(target))) {
+            recoverHomework("学习通未打开这份作业，请刷新后重试。")
+            return true
+        }
+        if (!currentDesktopMode || !isMobileHomeworkUrl(target)) return false
+        if (opensHomework) {
+            recoverHomework("学习通未提供这份作业的电脑版页面。")
+            return true
+        }
         if (!tryDesktopCourse(view)) {
             redirectedToMobile = true
             isLoading = false
@@ -223,7 +243,7 @@ fun AssessmentWebScreen(
                                 request: WebResourceRequest,
                             ): Boolean {
                                 val target = request.url?.toString().orEmpty()
-                                if (request.isForMainFrame && !blockNavigation(main, target)) {
+                                if (request.isForMainFrame && !blockNavigation(main, request)) {
                                     main.loadUrl(target)
                                 }
                                 return true
@@ -240,7 +260,7 @@ fun AssessmentWebScreen(
                 private var navigationVersion = 0
 
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
-                    request.isForMainFrame && blockNavigation(view, request.url.toString())
+                    request.isForMainFrame && blockNavigation(view, request)
 
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                     navigationVersion++
@@ -275,8 +295,9 @@ fun AssessmentWebScreen(
                         view.postDelayed({
                             if (isCurrentPage()) {
                                 view.evaluateJavascript(CHECK_DESKTOP_LAYOUT_JS) { stillEmpty ->
-                                    if (stillEmpty == "true" && isCurrentPage() && !tryDesktopCourse(view)) {
-                                        errorMessage = "学习通电脑版没有返回作业内容。"
+                                    if (stillEmpty == "true" && isCurrentPage()) {
+                                        if (opensHomework) recoverHomework("学习通电脑版没有返回这份作业的内容。")
+                                        else if (!tryDesktopCourse(view)) errorMessage = "学习通电脑版没有返回作业内容。"
                                     }
                                 }
                             }

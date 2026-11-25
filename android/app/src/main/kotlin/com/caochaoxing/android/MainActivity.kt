@@ -6,6 +6,7 @@ package com.caochaoxing.android
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -31,21 +33,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Forum
-import androidx.compose.material.icons.automirrored.rounded.MenuBook
-import androidx.compose.material.icons.rounded.QrCodeScanner
-import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.GridView
+import androidx.compose.material.icons.outlined.QrCodeScanner
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarDuration
@@ -71,6 +72,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -83,6 +85,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.caochaoxing.android.state.AndroidAppState
+import com.caochaoxing.android.state.AssessmentOverviewController
 import com.caochaoxing.android.state.CaptchaChallengeRequest
 import com.caochaoxing.android.state.CourseStudyController
 import com.caochaoxing.android.ui.components.CxHairlineDivider
@@ -91,6 +94,7 @@ import com.caochaoxing.android.ui.components.CxPrimaryButton
 import com.caochaoxing.android.ui.components.CxTone
 import com.caochaoxing.android.ui.screens.AssessmentTodoScreen
 import com.caochaoxing.android.ui.screens.AssessmentWebScreen
+import com.caochaoxing.android.ui.screens.assessmentItemUrl
 import com.caochaoxing.android.ui.screens.desktopAssessmentUrl
 import com.caochaoxing.android.ui.screens.COURSE_SUBTAB_ASSESSMENT
 import com.caochaoxing.android.ui.screens.COURSE_SUBTAB_SIGN
@@ -113,6 +117,7 @@ import com.caochaoxing.android.ui.theme.CaochaoxingTheme
 import com.caochaoxing.android.ui.theme.CxPalette
 import com.caochaoxing.android.ui.theme.CxTypography
 import com.caochaoxing.core.model.ChaoxingCourse
+import com.caochaoxing.core.model.ChaoxingAssessmentItem
 import com.caochaoxing.core.model.ChaoxingSignActivity
 import com.caochaoxing.core.store.ChaoxingSnapshotJson
 import kotlinx.coroutines.delay
@@ -202,16 +207,13 @@ private object CxRoutes {
 /** 作业优先打开电脑版作业页，考试使用原链接。 */
 private fun openAssessmentPage(
     navController: androidx.navigation.NavHostController,
-    item: com.caochaoxing.core.model.ChaoxingAssessmentItem,
-    courses: List<ChaoxingCourse>,
+    item: ChaoxingAssessmentItem,
+    course: ChaoxingCourse?,
+    onMissingLink: () -> Unit,
 ) {
-    val raw = item.taskUrl?.takeIf { it.isNotBlank() }
-    val courseCpi = courses.firstOrNull { it.courseId == item.courseId && it.classId == item.classId }?.cpi
-    val desktop = desktopAssessmentUrl(item, courseCpi)
-    when {
-        desktop != null -> navController.navigate(CxRoutes.assessmentWeb(desktop, raw, item.title))
-        raw != null -> navController.navigate(CxRoutes.assessmentWeb(raw, null, item.title))
-    }
+    val raw = assessmentItemUrl(item) ?: return onMissingLink()
+    val desktop = desktopAssessmentUrl(item, course?.cpi)
+    navController.navigate(CxRoutes.assessmentWeb(desktop ?: raw, raw.takeIf { desktop != null && desktop != raw }, item.title))
 }
 
 private data class MainTabSpec(
@@ -221,10 +223,10 @@ private data class MainTabSpec(
 )
 
 private val MAIN_TABS = listOf(
-    MainTabSpec(AndroidAppState.TAB_COURSES, "课程", Icons.AutoMirrored.Rounded.MenuBook),
-    MainTabSpec(AndroidAppState.TAB_GROUPS, "群聊", Icons.Rounded.Forum),
-    MainTabSpec(AndroidAppState.TAB_QR, "扫码", Icons.Rounded.QrCodeScanner),
-    MainTabSpec(AndroidAppState.TAB_SETTINGS, "设置", Icons.Rounded.Settings),
+    MainTabSpec(AndroidAppState.TAB_COURSES, "课程", Icons.Outlined.GridView),
+    MainTabSpec(AndroidAppState.TAB_GROUPS, "群聊", Icons.Outlined.ChatBubbleOutline),
+    MainTabSpec(AndroidAppState.TAB_QR, "扫码", Icons.Outlined.QrCodeScanner),
+    MainTabSpec(AndroidAppState.TAB_SETTINGS, "设置", Icons.Outlined.Settings),
 )
 
 /**
@@ -259,6 +261,7 @@ fun CaochaoxingMainRoot(
             onDismiss = onDismiss,
         )
     },
+    assessmentOverviewController: AssessmentOverviewController? = null,
 ) {
     val uiState by appState.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -329,6 +332,7 @@ fun CaochaoxingMainRoot(
                     AuthenticatedMainContainer(
                         appState = appState,
                         courseStudyController = resolvedCourseStudyController,
+                        assessmentOverviewController = assessmentOverviewController,
                         onRouteMainStatusChange = { isMain -> isOnMainRoute = isMain },
                         signWorkspaceContent = signWorkspaceContent,
                     )
@@ -350,7 +354,7 @@ fun CaochaoxingMainRoot(
         }
 
         val snackbarBottomPadding = if (isAuthenticated && isOnMainRoute) {
-            88.dp
+            66.dp
         } else {
             16.dp
         }
@@ -428,6 +432,7 @@ private val SignActivityStateSaver: Saver<ChaoxingSignActivity?, String> = Saver
 private fun AuthenticatedMainContainer(
     appState: AndroidAppState,
     courseStudyController: CourseStudyController,
+    assessmentOverviewController: AssessmentOverviewController?,
     onRouteMainStatusChange: (Boolean) -> Unit,
     signWorkspaceContent: @Composable (
         activity: ChaoxingSignActivity,
@@ -437,6 +442,7 @@ private fun AuthenticatedMainContainer(
 ) {
     val uiState by appState.uiState.collectAsStateWithLifecycle()
     val navController = rememberNavController()
+    val context = LocalContext.current
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     var activeSignActivity by rememberSaveable(stateSaver = SignActivityStateSaver) {
         mutableStateOf(null)
@@ -495,37 +501,27 @@ private fun AuthenticatedMainContainer(
                 containerColor = CxPalette.canvas,
                 contentWindowInsets = WindowInsets(0, 0, 0, 0),
                 bottomBar = {
-                    Column(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 20.dp)) {
                         CxHairlineDivider()
-                        NavigationBar(
-                            containerColor = CxPalette.canvas,
-                            tonalElevation = 0.dp,
-                        ) {
+                        Row(Modifier.fillMaxWidth().selectableGroup()) {
                             MAIN_TABS.forEach { tab ->
                                 val selected = uiState.selectedTab == tab.index
-                                NavigationBarItem(
-                                    selected = selected,
-                                    onClick = { appState.setSelectedTab(tab.index) },
-                                    icon = {
-                                        Icon(
-                                            imageVector = tab.icon,
-                                            contentDescription = null,
-                                        )
-                                    },
-                                    label = {
-                                        Text(
-                                            text = tab.label,
-                                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                                        )
-                                    },
-                                    colors = NavigationBarItemDefaults.colors(
-                                        selectedIconColor = CxPalette.accent,
-                                        selectedTextColor = CxPalette.accent,
-                                        indicatorColor = CxPalette.surfaceSecondary,
-                                        unselectedIconColor = CxPalette.inkSecondary,
-                                        unselectedTextColor = CxPalette.inkSecondary,
-                                    ),
-                                )
+                                val tint = if (selected) CxPalette.accent else CxPalette.inkTertiary
+                                Column(
+                                    modifier = Modifier.weight(1f).defaultMinSize(minHeight = 52.dp)
+                                        .selectable(selected = selected, role = Role.Tab) { appState.setSelectedTab(tab.index) }
+                                        .padding(vertical = 5.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically),
+                                ) {
+                                    Icon(tab.icon, null, tint = tint, modifier = Modifier.size(20.dp))
+                                    Text(
+                                        text = tab.label,
+                                        style = CxTypography.eyebrow,
+                                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                                        color = tint,
+                                    )
+                                }
                             }
                         }
                     }
@@ -542,6 +538,7 @@ private fun AuthenticatedMainContainer(
                             AndroidAppState.TAB_COURSES -> CourseListScreen(
                                 appState = appState,
                                 courseStudyController = courseStudyController,
+                                assessmentOverviewController = assessmentOverviewController,
                                 onCourseClick = { course ->
                                     navController.navigate(CxRoutes.courseDetail(course.id))
                                 },
@@ -585,6 +582,7 @@ private fun AuthenticatedMainContainer(
                             else -> CourseListScreen(
                                 appState = appState,
                                 courseStudyController = courseStudyController,
+                                assessmentOverviewController = assessmentOverviewController,
                                 onCourseClick = { course ->
                                     navController.navigate(CxRoutes.courseDetail(course.id))
                                 },
@@ -622,7 +620,9 @@ private fun AuthenticatedMainContainer(
                 courseStudyController = courseStudyController,
                 initialSubTab = initialTab,
                 onOpenAssessmentPage = { item ->
-                    openAssessmentPage(navController, item, uiState.courses)
+                    openAssessmentPage(navController, item, uiState.courses.firstOrNull { it.id == courseKey }) {
+                        Toast.makeText(context, "这项待办暂无可用链接", Toast.LENGTH_SHORT).show()
+                    }
                 },
             )
         }
@@ -630,12 +630,19 @@ private fun AuthenticatedMainContainer(
         composable(CxRoutes.ASSESSMENT_TODO) {
             AssessmentTodoScreen(
                 appState = appState,
+                assessmentOverviewController = assessmentOverviewController,
                 onBack = { navController.popBackStack() },
                 onCourseClick = { course ->
                     navController.navigate(CxRoutes.courseDetail(course.id, tab = COURSE_SUBTAB_ASSESSMENT))
                 },
                 onOpenWeb = { item ->
-                    openAssessmentPage(navController, item, uiState.courses)
+                    val course = uiState.courses.firstOrNull { it.courseId == item.courseId && it.classId == item.classId }
+                    openAssessmentPage(navController, item, course) {
+                        if (course != null) {
+                            navController.navigate(CxRoutes.courseDetail(course.id, tab = COURSE_SUBTAB_ASSESSMENT))
+                        }
+                        Toast.makeText(context, "这项待办暂无可用链接", Toast.LENGTH_SHORT).show()
+                    }
                 },
             )
         }

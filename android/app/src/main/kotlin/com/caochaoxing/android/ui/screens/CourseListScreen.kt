@@ -7,22 +7,33 @@ package com.caochaoxing.android.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AccountCircle
-import androidx.compose.material.icons.rounded.Bookmark
-import androidx.compose.material.icons.rounded.BookmarkBorder
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Calculate
+import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Science
+import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material.icons.rounded.Clear
 import androidx.compose.material.icons.rounded.Gesture
 import androidx.compose.material.icons.rounded.LocationOn
@@ -36,9 +47,10 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -46,8 +58,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -61,18 +71,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.caochaoxing.android.CaochaoxingApp
 import com.caochaoxing.android.state.AndroidAppState
+import com.caochaoxing.android.state.AssessmentOverviewController
 import com.caochaoxing.android.state.CourseStudyController
 import com.caochaoxing.android.ui.components.CxBadge
 import com.caochaoxing.android.ui.components.CxFlowRow
 import com.caochaoxing.android.ui.components.CxIconTile
-import com.caochaoxing.android.ui.components.CxWordmark
 import com.caochaoxing.android.ui.components.CxSectionHeader
 import com.caochaoxing.android.ui.components.CxSurfaceCard
 import com.caochaoxing.android.ui.components.CxTone
@@ -96,6 +108,7 @@ internal fun chaoxingSignTypeIcon(type: ChaoxingSignType): ImageVector = when (t
  * Course list tab featuring starred-course pinning, live search, and the pending-activity radar.
  */
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 fun CourseListScreen(
     appState: AndroidAppState,
     onCourseClick: (ChaoxingCourse) -> Unit,
@@ -104,17 +117,19 @@ fun CourseListScreen(
     onOpenTodo: () -> Unit,
     modifier: Modifier = Modifier,
     courseStudyController: CourseStudyController? = null,
+    assessmentOverviewController: AssessmentOverviewController? = null,
 ) {
     val uiState by appState.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val overviewController = remember(context) {
-        (context.applicationContext as? CaochaoxingApp)?.assessmentOverviewController
+    val overviewController = remember(context, assessmentOverviewController) {
+        assessmentOverviewController ?: (context.applicationContext as? CaochaoxingApp)?.assessmentOverviewController
     }
     val overviewState = overviewController?.uiState?.collectAsStateWithLifecycle()?.value
     val studyState = courseStudyController?.uiState?.collectAsStateWithLifecycle()?.value
     val appScope = rememberAppPersistenceScope()
     var searchText by rememberSaveable { mutableStateOf("") }
     var isRefreshing by remember { mutableStateOf(false) }
+    var showCourseTools by remember { mutableStateOf(false) }
 
     val filteredCourses = remember(uiState.courses, uiState.starredCourseIds, searchText) {
         val query = searchText.trim()
@@ -156,26 +171,23 @@ fun CourseListScreen(
         modifier = modifier.fillMaxSize(),
         containerColor = CxPalette.canvas,
         topBar = {
-            TopAppBar(
-                title = { CxWordmark() },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = CxPalette.canvas,
-                    titleContentColor = CxPalette.ink,
-                ),
-                actions = {
-                    AppUpdateButton()
-                    uiState.activeAccount?.let { account ->
-                        IconButton(onClick = onManageAccounts) {
-                            Icon(
-                                imageVector = Icons.Rounded.AccountCircle,
-                                contentDescription = "管理账号：${account.name.ifBlank { account.phoneNumber }}",
-                                tint = CxPalette.inkSecondary,
-                            )
-                        }
-                    }
-                    IconButton(
-                        onClick = { triggerRefresh() },
-                        enabled = !isRefreshing && !uiState.isLoading,
+            Row(
+                modifier = Modifier.fillMaxWidth().background(CxPalette.canvas).statusBarsPadding()
+                    .padding(start = 22.dp, end = 12.dp).heightIn(min = 76.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("我的课程", style = CxTypography.screenTitle, color = CxPalette.ink)
+                Box {
+                    Box(
+                        modifier = Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).combinedClickable(
+                            role = Role.Button,
+                            onClickLabel = "刷新课程",
+                            onClick = { if (!uiState.isLoading) triggerRefresh() },
+                            onLongClickLabel = "打开课程工具",
+                            onLongClick = { showCourseTools = true },
+                        ),
+                        contentAlignment = Alignment.Center,
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Refresh,
@@ -183,8 +195,26 @@ fun CourseListScreen(
                             tint = CxPalette.accent,
                         )
                     }
-                },
-            )
+                    DropdownMenu(expanded = showCourseTools, onDismissRequest = { showCourseTools = false }) {
+                        DropdownMenuItem(
+                            text = { Text(if (uiState.isScanningRadar) "正在查找待签活动" else "查找待签活动") },
+                            enabled = !uiState.isScanningRadar && uiState.courses.isNotEmpty(),
+                            onClick = {
+                                showCourseTools = false
+                                searchText = ""
+                                appScope.launch { appState.scanPendingActivitiesRadar() }
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("管理账号") },
+                            onClick = {
+                                showCourseTools = false
+                                onManageAccounts()
+                            },
+                        )
+                    }
+                }
+            }
         },
     ) { innerPadding ->
         PullToRefreshBox(
@@ -192,43 +222,22 @@ fun CourseListScreen(
             onRefresh = { triggerRefresh() },
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding),
+                .padding(innerPadding)
+                .consumeWindowInsets(innerPadding),
         ) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 14.dp),
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 2.dp, bottom = 16.dp),
             ) {
-                item(key = "course_title") {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Column(
-                            modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            Text("我的课程", style = CxTypography.brandDisplay, color = CxPalette.ink)
-                            if (uiState.courses.isNotEmpty()) {
-                                val favorites = uiState.courses.count { it.courseId in uiState.starredCourseIds }
-                                Text(
-                                    text = buildString {
-                                        append("共 ${uiState.courses.size} 门课程")
-                                        if (favorites > 0) append("，$favorites 门常用")
-                                    },
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = CxPalette.inkSecondary,
-                                )
-                            }
-                        }
-                        if (uiState.courses.isNotEmpty()) {
-                            val loadedOverview = overviewState?.takeIf { it.hasLoadedAny }
-                            PendingHomeworkEntry(
-                                count = loadedOverview?.pendingWorkCount,
-                                overdueCount = loadedOverview?.overdueWorkCount(System.currentTimeMillis()),
-                                onOpen = onOpenTodo,
-                            )
-                        }
+                if (uiState.courses.isNotEmpty()) {
+                    item(key = "pending_homework") {
+                        val loadedOverview = overviewState?.takeIf { it.hasLoadedAny }
+                        PendingHomeworkEntry(
+                            count = loadedOverview?.pendingWorkCount,
+                            overdueCount = loadedOverview?.overdueWorkCount(System.currentTimeMillis()),
+                            onOpen = onOpenTodo,
+                            modifier = Modifier.padding(bottom = 14.dp),
+                        )
                     }
                 }
 
@@ -273,8 +282,9 @@ fun CourseListScreen(
                     OutlinedTextField(
                         value = searchText,
                         onValueChange = { searchText = it },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp).height(48.dp),
                         placeholder = { Text("搜索课程或教师") },
+                        textStyle = MaterialTheme.typography.bodyMedium,
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
                         colors = cxOutlinedTextFieldColors(),
@@ -300,34 +310,6 @@ fun CourseListScreen(
                 }
 
                 if (searchText.isBlank() && uiState.courses.isNotEmpty()) {
-                    item(key = "radar_card") {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 14.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(CxPalette.surfaceSecondary)
-                                .padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("待签活动", style = CxTypography.headline, color = CxPalette.ink)
-                                Text(
-                                    text = if (uiState.starredCourseIds.isEmpty()) "在全部课程中查找" else "仅查找常用课程",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = CxPalette.inkSecondary,
-                                )
-                            }
-                            TextButton(
-                                onClick = { appScope.launch { appState.scanPendingActivitiesRadar() } },
-                                enabled = !uiState.isScanningRadar,
-                            ) {
-                                Text(if (uiState.isScanningRadar) "查找中…" else "查找活动")
-                            }
-                        }
-                    }
-
                     items(
                         items = uiState.pendingRadarItems,
                         key = { "radar_${it.course.id}_${it.activity.id}" },
@@ -426,81 +408,87 @@ fun CourseListScreen(
                         }
                     }
                 } else {
-                    items(
+                    itemsIndexed(
                         items = filteredCourses,
-                        key = { it.id },
-                    ) { course ->
-                        val isStarred = course.courseId in uiState.starredCourseIds
+                        key = { _, course -> course.id },
+                    ) { index, course ->
                         val boundLocation = uiState.boundLocation(course.courseId)
+                        val last = index == filteredCourses.lastIndex
+                        val shape = RoundedCornerShape(
+                            topStart = if (index == 0) 14.dp else 0.dp,
+                            topEnd = if (index == 0) 14.dp else 0.dp,
+                            bottomStart = if (last) 14.dp else 0.dp,
+                            bottomEnd = if (last) 14.dp else 0.dp,
+                        )
 
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onCourseClick(course) }
-                                .padding(vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            CxIconTile(
-                                icon = Icons.AutoMirrored.Rounded.MenuBook,
-                                tone = if (isStarred) CxTone.ACCENT else CxTone.NEUTRAL,
-                                size = 38.dp,
-                            )
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                        Column(Modifier.clip(shape).background(CxPalette.surface)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().clickable { onCourseClick(course) }
+                                    .heightIn(min = 69.dp).padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
-                                Text(
-                                    text = course.courseName,
-                                    style = CxTypography.headline,
-                                    color = CxPalette.ink,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                CxFlowRow(horizontalSpacing = 8.dp, verticalSpacing = 4.dp) {
+                                Box(
+                                    modifier = Modifier.size(40.dp)
+                                        .background(CxPalette.surfaceSecondary, RoundedCornerShape(10.dp)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(courseSubjectIcon(course.courseName), null, tint = CxPalette.accent)
+                                }
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
                                     Text(
-                                        text = course.teacherName.ifBlank { "未提供教师信息" },
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = CxPalette.inkSecondary,
+                                        text = course.courseName,
+                                        style = CxTypography.headline.copy(fontWeight = FontWeight.Bold),
+                                        color = CxPalette.ink,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
                                     )
-                                    if (boundLocation != null) {
-                                        CxBadge(text = boundLocation.name, tone = CxTone.SAGE, icon = Icons.Rounded.Place)
+                                    CxFlowRow(horizontalSpacing = 8.dp, verticalSpacing = 4.dp) {
+                                        Text(
+                                            text = course.teacherName.takeIf { it.isNotBlank() }
+                                                ?.let { "任课教师：$it" } ?: "未提供教师信息",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = CxPalette.inkSecondary,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        if (boundLocation != null) {
+                                            CxBadge(text = boundLocation.name, tone = CxTone.SAGE, icon = Icons.Rounded.Place)
+                                        }
                                     }
                                 }
-                            }
-                            val pendingWorks = overviewState?.pendingWorks(course.id) ?: 0
-                            val pendingExams = overviewState?.pendingExams(course.id) ?: 0
-                            Column(
-                                horizontalAlignment = Alignment.End,
-                                verticalArrangement = Arrangement.spacedBy(3.dp),
-                            ) {
-                                if (overviewState != null && course.id in overviewState.loadingCourseKeys) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(12.dp),
-                                        strokeWidth = 1.5.dp,
-                                    )
-                                } else {
-                                    if (pendingWorks > 0) {
-                                        CxBadge(text = "作业 $pendingWorks", tone = CxTone.AMBER, monospaced = true)
-                                    }
-                                    if (pendingExams > 0) {
-                                        CxBadge(text = "考试 $pendingExams", tone = CxTone.CINNABAR, monospaced = true)
+                                val pendingWorks = overviewState?.pendingWorks(course.id) ?: 0
+                                val pendingExams = overviewState?.pendingExams(course.id) ?: 0
+                                Column(
+                                    horizontalAlignment = Alignment.End,
+                                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                                ) {
+                                    if (overviewState != null && course.id in overviewState.loadingCourseKeys) {
+                                        CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.5.dp)
+                                    } else {
+                                        if (pendingWorks > 0) {
+                                            Text(
+                                                text = "$pendingWorks 项作业",
+                                                modifier = Modifier.background(CxPalette.canvas, RoundedCornerShape(7.dp))
+                                                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = CxPalette.inkSecondary,
+                                            )
+                                        }
+                                        if (pendingExams > 0) {
+                                            CxBadge(text = "$pendingExams 项考试", tone = CxTone.CINNABAR)
+                                        }
                                     }
                                 }
-                            }
-                            IconToggleButton(
-                                checked = isStarred,
-                                onCheckedChange = { appScope.launch { appState.toggleStarCourse(course.courseId) } },
-                            ) {
                                 Icon(
-                                    imageVector = if (isStarred) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
-                                    contentDescription = "常用课程：${course.courseName}",
-                                    tint = if (isStarred) CxPalette.accent else CxPalette.inkTertiary,
+                                    Icons.AutoMirrored.Rounded.KeyboardArrowRight, null,
+                                    tint = CxPalette.inkTertiary, modifier = Modifier.size(16.dp),
                                 )
                             }
-                        }
-                        if (course.id != filteredCourses.last().id) {
-                            HorizontalDivider(color = CxPalette.border, thickness = Dp.Hairline)
+                            if (!last) HorizontalDivider(color = CxPalette.border, thickness = Dp.Hairline)
                         }
                     }
                 }
@@ -514,32 +502,48 @@ private fun PendingHomeworkEntry(
     count: Int?,
     overdueCount: Int?,
     onOpen: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Surface(
         onClick = onOpen,
-        modifier = Modifier.widthIn(min = 104.dp, max = 148.dp),
-        shape = RoundedCornerShape(12.dp),
-        color = CxPalette.amber.copy(alpha = 0.12f),
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        color = CxPalette.surfaceSecondary,
     ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
+        Row(
+            modifier = Modifier.heightIn(min = 73.dp).padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = "未完成的作业",
-                style = CxTypography.eyebrow,
-                color = CxPalette.ink,
-            )
-            Text(
-                text = count?.toString() ?: "—",
-                style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.SemiBold),
-                color = CxPalette.amber,
-            )
-            Text(
-                text = if (overdueCount == null) "逾期 —" else "逾期 $overdueCount 项",
-                style = CxTypography.eyebrow,
-                color = if ((overdueCount ?: 0) > 0) CxPalette.cinnabar else CxPalette.inkSecondary,
+            Box(
+                modifier = Modifier.size(38.dp).background(CxPalette.accent, RoundedCornerShape(10.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Outlined.Description, null, tint = CxPalette.onAccent, modifier = Modifier.size(22.dp))
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    "作业待办", style = CxTypography.headline.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold),
+                    color = CxPalette.ink,
+                )
+                Text(
+                    text = if (count != null && overdueCount != null) "$count 项未完成 / $overdueCount 项逾期" else "查看未完成和逾期作业",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = CxPalette.inkSecondary,
+                )
+            }
+            Icon(
+                Icons.AutoMirrored.Rounded.KeyboardArrowRight, null,
+                tint = CxPalette.inkTertiary, modifier = Modifier.size(16.dp),
             )
         }
     }
+}
+
+internal fun courseSubjectIcon(name: String): ImageVector = when {
+    "数学" in name || "代数" in name || "概率" in name || "统计" in name -> Icons.Outlined.Calculate
+    "程序" in name || "编程" in name || "计算机" in name -> Icons.Outlined.Code
+    "英语" in name || "外语" in name || "翻译" in name -> Icons.Outlined.Translate
+    "物理" in name || "化学" in name || "实验" in name -> Icons.Outlined.Science
+    else -> Icons.AutoMirrored.Outlined.MenuBook
 }

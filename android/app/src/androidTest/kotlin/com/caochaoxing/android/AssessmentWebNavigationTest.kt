@@ -33,15 +33,22 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class AssessmentWebNavigationTest {
     @Test
-    fun desktopRejectsMobileNavigationButAllowsAnExplicitSwitch() {
+    fun desktopListRejectsMobileNavigationAndRecoversFromBlankPage() = checkHomeworkNavigation(opensDetail = false)
+
+    @Test
+    fun desktopDetailFallsBackToTheSameMobileAssignment() = checkHomeworkNavigation(opensDetail = true)
+
+    private fun checkHomeworkNavigation(opensDetail: Boolean) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val capture = InstrumentationRegistry.getArguments().getString("capture") == "true"
         val app = instrumentation.targetContext.applicationContext as CaochaoxingApp
         assumeTrue(app.appState.uiState.value.accounts.isEmpty())
-        val desktop = "https://fixture.chaoxing.com/mooc-ans/mooc2/work/task?courseId=3&classId=2&cpi=7&workId=9"
+        val desktopPath = if (opensDetail) "task" else "list"
+        val desktop = "https://fixture.chaoxing.com/mooc-ans/mooc2/work/$desktopPath?courseId=3&classId=2&cpi=7&workId=9"
         val mobile = "https://fixture.chaoxing.com/work/phone/task-work?workId=9"
         val blank = "https://fixture.chaoxing.com/mooc-ans/mooc2/work/task?workId=10"
-        val course = checkNotNull(desktopAssessmentCourseFallback(desktop))
+        val course = desktopAssessmentCourseFallback(desktop)
+        val chapters = "https://fixture.chaoxing.com/mooc-ans/mycourse/studentstudy?chapterId=11"
         val list = "https://mooc1.chaoxing.com/mooc2/work/list?enc=fixture-list"
         val automation = instrumentation.uiAutomation
         val ready = ArrayBlockingQueue<WebView>(1)
@@ -73,7 +80,8 @@ class AssessmentWebNavigationTest {
                                     desktop -> fixture(
                                         "模拟电脑版作业",
                                         "第 3 章 软件测试",
-                                        "<a id='mobile' href='$mobile'>模拟跳到手机版</a><br><a id='blank' href='$blank'>模拟白屏</a>",
+                                        "<a id='mobile' href='$mobile'>模拟跳到手机版</a><br>" +
+                                            "<a id='blank' href='$blank'>模拟白屏</a>",
                                     )
                                     blank -> "<!doctype html><img width='20' height='20' src='data:image/svg+xml," +
                                         "%3Csvg xmlns=%22http://www.w3.org/2000/svg%22%3E%3C/svg%3E'>"
@@ -88,6 +96,7 @@ class AssessmentWebNavigationTest {
                                         "<style>html,body{height:100%;overflow-y:hidden!important}</style>" +
                                             (1..24).joinToString("") { "<p style='padding:20px;background:#f1f5f9'>作业项目 $it</p>" },
                                     )
+                                    chapters -> error("作业页跳到了章节")
                                     mobile -> fixture("模拟手机版作业", "第 3 章 软件测试", "<p>已手动切换到手机版</p>")
                                     else -> ""
                                 }
@@ -139,6 +148,15 @@ class AssessmentWebNavigationTest {
 
             checkPage("模拟电脑版作业", "Windows NT")
             evaluate("document.getElementById('blank').click()")
+            if (opensDetail) {
+                checkPage("模拟手机版作业", "Android")
+                switchTo("切换到电脑版")
+                checkPage("模拟电脑版作业", "Windows NT")
+                evaluate("location.href = '$chapters'")
+                checkPage("模拟手机版作业", "Android")
+                assertTrue(evaluate("location.href === '$mobile'") == "true")
+                return@use
+            }
             checkPage("模拟电脑版作业列表", "Windows NT")
             waitFor("getComputedStyle(document.documentElement).overflowY === 'auto'", "Desktop page still blocks scrolling")
             capturePage("recovered")

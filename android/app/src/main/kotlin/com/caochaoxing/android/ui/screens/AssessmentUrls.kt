@@ -13,39 +13,44 @@ import java.util.Locale
 private const val DESKTOP_WORK_BASE = "https://mooc1.chaoxing.com/mooc-ans"
 private const val DESKTOP_COURSE_PATH = "/visit/stucoursemiddle"
 
+internal fun assessmentItemUrl(item: ChaoxingAssessmentItem): String? {
+    val url = item.taskUrl?.trim()?.replaceFirst(Regex("^http://", RegexOption.IGNORE_CASE), "https://")
+        ?: return null
+    val path = assessmentPath(url) ?: return null
+    return url.takeUnless { isCourseStudyUrl(it) || isHomeworkListPath(path) }
+}
+
 /** 优先使用服务端已给出的电脑版作业链接。考试保持原链接。 */
 internal fun desktopAssessmentUrl(item: ChaoxingAssessmentItem, courseCpi: Long? = null): String? {
     if (item.kind != ChaoxingAssessmentKind.WORK) return null
-    val raw = item.taskUrl?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    val raw = assessmentItemUrl(item) ?: return null
     val path = assessmentPath(raw) ?: return null
-    if (isDesktopAssessmentPath(path)) return raw.replaceFirst(Regex("^http://", RegexOption.IGNORE_CASE), "https://")
+    if (isDesktopAssessmentPath(path)) return raw
+    if (!isMobileHomeworkUrl(raw)) return null
 
     val query = parseQuery(raw.substringAfter('?', "").substringBefore('#'))
     val workId = query["workid"] ?: query["work_id"] ?: query["id"]
         ?: path.substringAfterLast('/').takeIf { it.isNotEmpty() && it.all(Char::isDigit) }
+        ?: return null
     val courseId = query["courseid"] ?: item.courseId.takeIf { it > 0 }?.toString() ?: return null
     val classId = query["classid"] ?: query["clazzid"] ?: item.classId.takeIf { it > 0 }?.toString() ?: return null
     val parameters = linkedMapOf("courseId" to courseId, "classId" to classId)
     val cpi = query["cpi"] ?: courseCpi?.takeIf { it > 0 }?.toString()
     cpi?.let { parameters["cpi"] = it }
-    val target = when {
-        workId == null -> return desktopCourseUrl(courseId, classId, cpi)
-        else -> {
-            parameters["workId"] = workId
-            val answerId = query["answerid"] ?: query["workanswerid"]
-            val enc = query["enc"]
-            answerId?.let { parameters["answerId"] = it }
-            enc?.let { parameters["enc"] = it }
-            query["ut"]?.let { parameters["ut"] = it }
-            if (cpi != null && answerId != null && enc != null) "/mooc2/work/task"
-            else "/work/doHomeWorkNew"
-        }
-    }
+    parameters["workId"] = workId
+    val answerId = query["answerid"] ?: query["workanswerid"]
+    val enc = query["enc"]
+    answerId?.let { parameters["answerId"] = it }
+    enc?.let { parameters["enc"] = it }
+    query["ut"]?.let { parameters["ut"] = it }
+    val target = if (cpi != null && answerId != null && enc != null) "/mooc2/work/task"
+    else "/work/doHomeWorkNew"
     return buildDesktopWorkUrl(target, parameters)
 }
 
 internal fun desktopAssessmentCourseFallback(url: String): String? {
-    if (assessmentPath(url)?.let(::isDesktopAssessmentPath) != true) return null
+    val path = assessmentPath(url) ?: return null
+    if (!isDesktopAssessmentPath(path) || !isHomeworkListPath(path)) return null
     val query = parseQuery(url.substringAfter('?', "").substringBefore('#'))
     val courseId = query["courseid"] ?: return null
     val classId = query["classid"] ?: query["clazzid"] ?: return null
@@ -66,6 +71,25 @@ internal fun isDesktopAssessmentUrl(url: String): Boolean =
 
 internal fun isDesktopAssessmentCourseUrl(url: String): Boolean = when (assessmentPath(url)) {
     DESKTOP_COURSE_PATH, "/mooc2-ans/mycourse/studentcourse", "/mooc-ans/mycourse/studentcourse" -> true
+    else -> false
+}
+
+internal fun isCourseStudyUrl(url: String): Boolean {
+    val path = assessmentPath(url) ?: return false
+    return isDesktopAssessmentCourseUrl(url) ||
+        path.substringAfterLast('/') in setOf("studentstudy", "studentstudycourselist", "studentstudyajax")
+}
+
+internal fun isHomeworkDetailUrl(url: String): Boolean {
+    val path = assessmentPath(url) ?: return false
+    return !isHomeworkListPath(path) && (isDesktopAssessmentPath(path) || isMobileHomeworkUrl(url))
+}
+
+internal fun isHomeworkListUrl(url: String): Boolean =
+    assessmentPath(url)?.let(::isHomeworkListPath) == true
+
+private fun isHomeworkListPath(path: String): Boolean = when (path.removePrefix("/mooc-ans")) {
+    "/mooc2/work/list", "/work/task-list", "/work/phone/task-list", "/phone/moocanalysis/worklist" -> true
     else -> false
 }
 

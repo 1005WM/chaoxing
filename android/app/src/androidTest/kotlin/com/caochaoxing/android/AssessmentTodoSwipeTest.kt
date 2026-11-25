@@ -40,6 +40,7 @@ import org.junit.runner.RunWith
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(AndroidJUnit4::class)
 class AssessmentTodoSwipeTest {
@@ -64,6 +65,8 @@ class AssessmentTodoSwipeTest {
             loadCompletedWorks = store::load, saveCompletedWorks = store::save,
         )
         val opens = AtomicInteger()
+        val openedWork = AtomicReference<ChaoxingAssessmentItem>()
+        val openedCourse = AtomicReference<ChaoxingAssessmentItem>()
         fun nodes(node: AccessibilityNodeInfo?): Sequence<AccessibilityNodeInfo> = sequence {
             if (node != null) { yield(node); for (i in 0 until node.childCount) yieldAll(nodes(node.getChild(i))) }
         }
@@ -74,6 +77,11 @@ class AssessmentTodoSwipeTest {
         }
         fun titleBounds(title: String): Rect = Rect().also { rect ->
             nodes(automation.rootInActiveWindow).first { it.text?.toString() == title }.getBoundsInScreen(rect)
+        }
+        fun click(title: String) {
+            val node = nodes(automation.rootInActiveWindow).first { it.text?.toString() == title }
+            val target = generateSequence(node) { it.parent }.first { it.isClickable }
+            assertTrue(target.performAction(AccessibilityNodeInfo.ACTION_CLICK))
         }
         fun swipe(title: String, left: Boolean, capture: Boolean = false) {
             val y = titleBounds(title).centerY().toFloat()
@@ -112,13 +120,20 @@ class AssessmentTodoSwipeTest {
                             Column(Modifier.fillMaxSize().background(CxPalette.canvas).systemBarsPadding()) {
                                 Text("未完成作业", modifier = Modifier.padding(20.dp), style = CxTypography.title, color = CxPalette.ink)
                                 TodoListContent(controller.uiState.collectAsState().value,
-                                    onCourseClick = {}, onOpenWeb = { opens.incrementAndGet() },
+                                    onCourseClick = { openedCourse.set(it) },
+                                    onOpenWeb = { openedWork.set(it); opens.incrementAndGet() },
                                     onMarkCompleted = { controller.setWorkCompleted(it, true, phone) })
                             }
                         }
                     }
                 }
                 waitFor { nodes(automation.rootInActiveWindow).any { it.text?.toString() == work.title } }
+                click(second.title)
+                waitFor { openedWork.get() == second }
+                assertNull(openedCourse.get())
+                click(course.courseName)
+                waitFor { openedCourse.get()?.courseId == course.courseId }
+                assertEquals(1, opens.get())
                 swipe(work.title, left = false)
                 assertEquals(2, controller.uiState.value.pendingWorkCount)
                 swipe(exam.title, left = true)

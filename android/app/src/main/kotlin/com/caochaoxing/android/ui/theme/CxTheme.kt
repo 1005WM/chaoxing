@@ -28,47 +28,48 @@ import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 
 /**
- * Warm neutral surfaces, charcoal text and a clay accent for the Android interface.
+ * Gray-green surfaces, deep green actions and orange attention states.
  */
 object CxPaletteSpecs {
-    val canvasLight = Color(0xFFF8F7F3)
-    val canvasDark = Color(0xFF22211F)
+    val canvasLight = Color(0xFFF6F7F4)
+    val canvasDark = Color(0xFF16201A)
 
-    val surfaceLight = Color(0xFFFFFEFA)
-    val surfaceDark = Color(0xFF2B2A27)
+    val surfaceLight = Color(0xFFFFFFFF)
+    val surfaceDark = Color(0xFF1D2A23)
 
-    val surfaceSecondaryLight = Color(0xFFEFEDE7)
-    val surfaceSecondaryDark = Color(0xFF373530)
+    val surfaceSecondaryLight = Color(0xFFE6EDE8)
+    val surfaceSecondaryDark = Color(0xFF26372D)
 
-    val borderLight = Color(0xFFDCD8CE)
-    val borderDark = Color(0xFF514E48)
+    val borderLight = Color(0xFFDFE7E0)
+    val borderDark = Color(0xFF3A5244)
 
-    val inkLight = Color(0xFF272520)
-    val inkDark = Color(0xFFF2EFE8)
+    val inkLight = Color(0xFF16201A)
+    val inkDark = Color(0xFFF6F7F4)
 
-    val inkSecondaryLight = Color(0xFF625F57)
-    val inkSecondaryDark = Color(0xFFC9C4B8)
+    val inkSecondaryLight = Color(0xFF56695E)
+    val inkSecondaryDark = Color(0xFFB8C9BF)
 
-    val inkTertiaryLight = Color(0xFF6D695F)
-    val inkTertiaryDark = Color(0xFFB3AEA3)
+    val inkTertiaryLight = Color(0xFF607268)
+    val inkTertiaryDark = Color(0xFFA2B6AA)
 
-    val accentLight = Color(0xFFA34B35)
-    val accentDark = Color(0xFFEEA38B)
+    val accentLight = Color(0xFF2A7A5F)
+    val accentDark = Color(0xFF8BC9AE)
 
     val onAccentLight = Color(0xFFFFFFFF)
-    val onAccentDark = Color(0xFF2B1C17)
+    val onAccentDark = Color(0xFF16201A)
 
-    val sageLight = Color(0xFF3F6A56)
-    val sageDark = Color(0xFF9FCAAE)
+    val sageLight = Color(0xFF39745D)
+    val sageDark = Color(0xFFA9CDB9)
 
-    val amberLight = Color(0xFF845D28)
-    val amberDark = Color(0xFFDBB77C)
+    val warningFill = Color(0xFFCE7340)
+    val amberLight = Color(0xFF9A461C)
+    val amberDark = Color(0xFFF1AC81)
 
-    val cinnabarLight = Color(0xFFA43A39)
-    val cinnabarDark = Color(0xFFF19E98)
+    val cinnabarLight = Color(0xFFA14825)
+    val cinnabarDark = Color(0xFFF6AB89)
 
-    val plumLight = Color(0xFF735773)
-    val plumDark = Color(0xFFC8ABCA)
+    val plumLight = Color(0xFF546E60)
+    val plumDark = Color(0xFFACBFB2)
 }
 
 @Immutable
@@ -178,6 +179,13 @@ object CxTheme {
 }
 
 object CxTypography {
+    val screenTitle: TextStyle = TextStyle(
+        fontFamily = FontFamily.Default,
+        fontWeight = FontWeight.Bold,
+        fontSize = 24.sp,
+        lineHeight = 32.sp,
+    )
+
     val brandDisplay: TextStyle = TextStyle(
         fontFamily = FontFamily.Serif,
         fontWeight = FontWeight.Normal,

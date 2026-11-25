@@ -3,6 +3,7 @@
 
 package com.caochaoxing.android
 
+import com.caochaoxing.android.ui.screens.assessmentItemUrl
 import com.caochaoxing.android.ui.screens.desktopAssessmentCourseFallback
 import com.caochaoxing.android.ui.screens.desktopAssessmentUrl
 import com.caochaoxing.android.ui.screens.isAllowedAssessmentUrl
@@ -58,7 +59,7 @@ class AssessmentWebUrlTest {
     }
 
     @Test
-    fun missingWorkIdOpensDesktopCourse() {
+    fun missingWorkIdKeepsOriginalAssignmentLink() {
         val item = ChaoxingAssessmentItem(
             kind = ChaoxingAssessmentKind.WORK,
             title = "作业",
@@ -67,10 +68,30 @@ class AssessmentWebUrlTest {
             classId = 200001,
             taskUrl = "https://mooc1-api.chaoxing.com/work/phone/task-work?courseId=300001&classId=200001",
         )
-        assertEquals(
-            "https://mooc1.chaoxing.com/visit/stucoursemiddle?courseid=300001&clazzid=200001&cpi=7001&vc=1&ismooc2=1&v=2",
-            desktopAssessmentUrl(item, courseCpi = 7001),
+        assertNull(desktopAssessmentUrl(item, courseCpi = 7001))
+        assertEquals(item.taskUrl, assessmentItemUrl(item))
+    }
+
+    @Test
+    fun courseAndListLinksAreNotIndividualAssignments() {
+        val item = ChaoxingAssessmentItem(
+            kind = ChaoxingAssessmentKind.WORK,
+            title = "作业",
+            statusText = "做作业",
+            courseId = 3,
+            classId = 2,
         )
+        val base = "https://mooc1.chaoxing.com"
+        listOf(
+            null,
+            "$base/visit/stucoursemiddle?courseid=3&clazzid=2",
+            "$base/mooc-ans/mycourse/studentstudy?chapterId=9&id=7",
+            "$base/mooc-ans/mooc2/work/list?courseId=3&classId=2",
+            "$base/phone/moocAnalysis/workList?courseId=3&classId=2",
+        ).forEach { url ->
+            assertNull(assessmentItemUrl(item.copy(taskUrl = url)))
+            assertNull(desktopAssessmentUrl(item.copy(taskUrl = url)))
+        }
     }
 
     @Test
@@ -88,7 +109,7 @@ class AssessmentWebUrlTest {
         assertEquals(desktop, desktopAssessmentUrl(item))
         assertTrue(isDesktopAssessmentUrl(desktop))
         val course = "https://mooc1.chaoxing.com/visit/stucoursemiddle?courseid=3&clazzid=2&cpi=7&vc=1&ismooc2=1&v=2"
-        assertEquals(course, desktopAssessmentCourseFallback(desktop))
+        assertNull(desktopAssessmentCourseFallback(desktop))
         assertEquals(course, desktopAssessmentCourseFallback(
             "https://mooc1.chaoxing.com/mooc-ans/mooc2/work/list?courseId=3&classId=2&cpi=7",
         ))
