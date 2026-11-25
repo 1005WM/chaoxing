@@ -44,6 +44,7 @@ import androidx.compose.material.icons.rounded.Place
 import androidx.compose.material.icons.rounded.QrCodeScanner
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.CircularProgressIndicator
@@ -178,23 +179,40 @@ fun CourseListScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("我的课程", style = CxTypography.screenTitle, color = CxPalette.ink)
-                Box {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // 主页也提供检查更新入口，避免只能在设置页右上角找到。
                     Box(
-                        modifier = Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).combinedClickable(
+                        modifier = Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).clickable(
                             role = Role.Button,
-                            onClickLabel = "刷新课程",
-                            onClick = { if (!uiState.isLoading) triggerRefresh() },
-                            onLongClickLabel = "打开课程工具",
-                            onLongClick = { showCourseTools = true },
-                        ),
+                            onClickLabel = "检查更新",
+                        ) {
+                            (context.applicationContext as? CaochaoxingApp)?.updateManager?.openDialog()
+                        },
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
-                            imageVector = Icons.Rounded.Refresh,
-                            contentDescription = "刷新课程",
+                            imageVector = Icons.Rounded.SystemUpdate,
+                            contentDescription = "检查更新",
                             tint = CxPalette.accent,
                         )
                     }
+                    Box {
+                        Box(
+                            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(12.dp)).combinedClickable(
+                                role = Role.Button,
+                                onClickLabel = "刷新课程",
+                                onClick = { if (!uiState.isLoading) triggerRefresh() },
+                                onLongClickLabel = "打开课程工具",
+                                onLongClick = { showCourseTools = true },
+                            ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Refresh,
+                                contentDescription = "刷新课程",
+                                tint = CxPalette.accent,
+                            )
+                        }
                     DropdownMenu(expanded = showCourseTools, onDismissRequest = { showCourseTools = false }) {
                         DropdownMenuItem(
                             text = { Text(if (uiState.isScanningRadar) "正在查找待签活动" else "查找待签活动") },
@@ -215,6 +233,7 @@ fun CourseListScreen(
                     }
                 }
             }
+            }
         },
     ) { innerPadding ->
         PullToRefreshBox(
@@ -232,8 +251,9 @@ fun CourseListScreen(
                 if (uiState.courses.isNotEmpty()) {
                     item(key = "pending_homework") {
                         val loadedOverview = overviewState?.takeIf { it.hasLoadedAny }
+                        // 与「作业待办」页保持一致：统计未完成作业 + 未完成考试，不能只算作业。
                         PendingHomeworkEntry(
-                            count = loadedOverview?.pendingWorkCount,
+                            count = loadedOverview?.totalPending,
                             overdueCount = loadedOverview?.overdueWorkCount(System.currentTimeMillis()),
                             onOpen = onOpenTodo,
                             modifier = Modifier.padding(bottom = 14.dp),
@@ -469,14 +489,9 @@ fun CourseListScreen(
                                     if (overviewState != null && course.id in overviewState.loadingCourseKeys) {
                                         CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.5.dp)
                                     } else {
+                                        // 作业与考试统一用醒目徽章，避免作业角标是灰色小字而像「消失」。
                                         if (pendingWorks > 0) {
-                                            Text(
-                                                text = "$pendingWorks 项作业",
-                                                modifier = Modifier.background(CxPalette.canvas, RoundedCornerShape(7.dp))
-                                                    .padding(horizontal = 8.dp, vertical = 3.dp),
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = CxPalette.inkSecondary,
-                                            )
+                                            CxBadge(text = "$pendingWorks 项作业", tone = CxTone.ACCENT)
                                         }
                                         if (pendingExams > 0) {
                                             CxBadge(text = "$pendingExams 项考试", tone = CxTone.CINNABAR)
@@ -521,16 +536,42 @@ private fun PendingHomeworkEntry(
             ) {
                 Icon(Icons.Outlined.Description, null, tint = CxPalette.onAccent, modifier = Modifier.size(22.dp))
             }
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 Text(
-                    "作业待办", style = CxTypography.headline.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold),
+                    "作业待办", style = CxTypography.headline.copy(fontSize = 15.sp, fontWeight = FontWeight.SemiBold),
                     color = CxPalette.ink,
                 )
-                Text(
-                    text = if (count != null && overdueCount != null) "$count 项未完成 / $overdueCount 项逾期" else "查看未完成和逾期作业",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = CxPalette.inkSecondary,
-                )
+                if (count != null) {
+                    Row(
+                        verticalAlignment = Alignment.Bottom,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            text = count.toString(),
+                            style = CxTypography.title.copy(fontSize = 36.sp, lineHeight = 40.sp, fontWeight = FontWeight.Bold),
+                            color = CxPalette.accent,
+                        )
+                        Text(
+                            text = "项待处理",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = CxPalette.inkSecondary,
+                            modifier = Modifier.padding(bottom = 5.dp),
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "查看未完成作业",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = CxPalette.inkSecondary,
+                    )
+                }
+                if (overdueCount != null && overdueCount > 0) {
+                    Text(
+                        text = "$overdueCount 项逾期",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = CxPalette.cinnabar,
+                    )
+                }
             }
             Icon(
                 Icons.AutoMirrored.Rounded.KeyboardArrowRight, null,

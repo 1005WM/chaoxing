@@ -5,12 +5,15 @@ package com.caochaoxing.android
 
 import com.caochaoxing.android.ui.screens.assessmentItemUrl
 import com.caochaoxing.android.ui.screens.desktopAssessmentCourseFallback
+import com.caochaoxing.android.ui.screens.desktopAssessmentFallbackUrl
 import com.caochaoxing.android.ui.screens.desktopAssessmentUrl
 import com.caochaoxing.android.ui.screens.isAllowedAssessmentUrl
 import com.caochaoxing.android.ui.screens.isDesktopAssessmentUrl
+import com.caochaoxing.android.ui.screens.isIndividualDesktopAssessmentUrl
 import com.caochaoxing.android.ui.screens.isMobileHomeworkUrl
 import com.caochaoxing.core.model.ChaoxingAssessmentItem
 import com.caochaoxing.core.model.ChaoxingAssessmentKind
+import com.caochaoxing.core.model.ChaoxingCourse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -70,6 +73,63 @@ class AssessmentWebUrlTest {
         )
         assertNull(desktopAssessmentUrl(item, courseCpi = 7001))
         assertEquals(item.taskUrl, assessmentItemUrl(item))
+    }
+
+    @Test
+    fun missingDesktopWorkPageFallsBackToCourseEntryAsSwitchTarget() {
+        val course = ChaoxingCourse(
+            courseName = "课程",
+            teacherName = "老师",
+            courseId = 300001L,
+            classId = 200001,
+            imageURL = "",
+            cpi = 7001L,
+        )
+        val item = ChaoxingAssessmentItem(
+            kind = ChaoxingAssessmentKind.WORK,
+            title = "缺编号的作业",
+            statusText = "做作业",
+            courseId = 300001L,
+            classId = 200001,
+            taskUrl = "https://mooc1-api.chaoxing.com/work/phone/task-work?courseId=300001&classId=200001",
+        )
+
+        // 单项电脑版映射仍为空，但回退出一个可用的电脑版目标，切换按钮得以保留。
+        assertNull(desktopAssessmentUrl(item, course.cpi))
+        val fallback = desktopAssessmentFallbackUrl(item, course)
+        assertTrue(fallback != null)
+        assertTrue(isDesktopAssessmentUrl(fallback!!))
+        assertTrue(fallback != item.taskUrl)
+        // 回退目标是课程入口而非单项作业页，因此默认仍从手机版进入。
+        assertFalse(isIndividualDesktopAssessmentUrl(fallback))
+        assertTrue(isMobileHomeworkUrl(item.taskUrl!!))
+    }
+
+    @Test
+    fun individualDesktopPageKeepsDesktopAsInitialView() {
+        val item = ChaoxingAssessmentItem(
+            kind = ChaoxingAssessmentKind.WORK,
+            title = "作业",
+            statusText = "做作业",
+            taskUrl = "https://mooc1.chaoxing.com/mooc-ans/work/doHomeWorkNew?workId=9&courseId=3&classId=2",
+        )
+        val desktop = desktopAssessmentUrl(item)
+        assertTrue(desktop != null)
+        assertTrue(isIndividualDesktopAssessmentUrl(desktop!!))
+    }
+
+    @Test
+    fun examsHaveNoDesktopSwitchTarget() {
+        val exam = ChaoxingAssessmentItem(
+            kind = ChaoxingAssessmentKind.EXAM,
+            title = "考试",
+            statusText = "未开始",
+            courseId = 3,
+            classId = 2,
+            taskUrl = "https://mooc1-api.chaoxing.com/exam/phone/task-exam?examId=1",
+        )
+        val course = ChaoxingCourse("课程", "老师", 3, 2, "")
+        assertNull(desktopAssessmentFallbackUrl(exam, course))
     }
 
     @Test

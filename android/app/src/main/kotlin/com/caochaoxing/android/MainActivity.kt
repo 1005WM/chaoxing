@@ -95,6 +95,7 @@ import com.caochaoxing.android.ui.components.CxTone
 import com.caochaoxing.android.ui.screens.AssessmentTodoScreen
 import com.caochaoxing.android.ui.screens.AssessmentWebScreen
 import com.caochaoxing.android.ui.screens.assessmentItemUrl
+import com.caochaoxing.android.ui.screens.desktopAssessmentFallbackUrl
 import com.caochaoxing.android.ui.screens.desktopAssessmentUrl
 import com.caochaoxing.android.ui.screens.COURSE_SUBTAB_ASSESSMENT
 import com.caochaoxing.android.ui.screens.COURSE_SUBTAB_SIGN
@@ -212,7 +213,8 @@ private fun openAssessmentPage(
     onMissingLink: () -> Unit,
 ) {
     val raw = assessmentItemUrl(item) ?: return onMissingLink()
-    val desktop = desktopAssessmentUrl(item, course?.cpi)
+    // 单项电脑版页优先；拿不到时退回电脑版课程作业入口，保证「电脑版/手机版」切换按钮不消失。
+    val desktop = desktopAssessmentUrl(item, course?.cpi) ?: desktopAssessmentFallbackUrl(item, course)
     navController.navigate(CxRoutes.assessmentWeb(desktop ?: raw, raw.takeIf { desktop != null && desktop != raw }, item.title))
 }
 

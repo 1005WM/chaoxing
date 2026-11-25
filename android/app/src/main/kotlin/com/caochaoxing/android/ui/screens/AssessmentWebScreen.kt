@@ -141,7 +141,8 @@ fun AssessmentWebScreen(
     val context = LocalContext.current
     val hasMobileVariant = !mobileUrl.isNullOrBlank() && mobileUrl != url && !isDesktopAssessmentUrl(mobileUrl)
     val opensHomework = remember(url) { isHomeworkDetailUrl(url) }
-    var desktopMode by remember(url) { mutableStateOf(isDesktopAssessmentUrl(url)) }
+    // 单项电脑版作业页默认进电脑版；课程入口/列表回退则默认进手机版，避免一开始就是易白页的列表。
+    var desktopMode by remember(url) { mutableStateOf(isIndividualDesktopAssessmentUrl(url)) }
     val currentDesktopMode by rememberUpdatedState(desktopMode)
     val currentDesktopCourseFallback by rememberUpdatedState(remember(url) { desktopAssessmentCourseFallback(url) })
     var triedDesktopCourse by remember(url) { mutableStateOf(false) }

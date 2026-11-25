@@ -5,6 +5,7 @@ package com.caochaoxing.android.ui.screens
 
 import com.caochaoxing.core.model.ChaoxingAssessmentItem
 import com.caochaoxing.core.model.ChaoxingAssessmentKind
+import com.caochaoxing.core.model.ChaoxingCourse
 import java.net.URI
 import java.net.URLDecoder
 import java.net.URLEncoder
@@ -48,6 +49,23 @@ internal fun desktopAssessmentUrl(item: ChaoxingAssessmentItem, courseCpi: Long?
     return buildDesktopWorkUrl(target, parameters)
 }
 
+/**
+ * 单项作业无法映射到电脑版时的回退桌面视图：电脑版课程作业列表入口。
+ *
+ * 与直接拼 `/mooc2/work/list` 相比，课程入口在真机上更不容易白页——页面加载后
+ * 由 AssessmentWebScreen 的 OPEN_COURSE_HOMEWORK_JS 自动点开「作业」标签。
+ * 它作为切换目标让「电脑版/手机版」按钮保持可见，默认仍打开手机版单项链接。
+ */
+internal fun desktopAssessmentFallbackUrl(item: ChaoxingAssessmentItem, course: ChaoxingCourse?): String? {
+    if (item.kind != ChaoxingAssessmentKind.WORK) return null
+    val courseId = item.courseId.takeIf { it > 0 }?.toString()
+        ?: course?.courseId?.takeIf { it > 0 }?.toString() ?: return null
+    val classId = item.classId.takeIf { it > 0 }?.toString()
+        ?: course?.classId?.takeIf { it > 0 }?.toString() ?: return null
+    val cpi = course?.cpi?.takeIf { it > 0 }?.toString()
+    return desktopCourseUrl(courseId, classId, cpi)
+}
+
 internal fun desktopAssessmentCourseFallback(url: String): String? {
     val path = assessmentPath(url) ?: return null
     if (!isDesktopAssessmentPath(path) || !isHomeworkListPath(path)) return null
@@ -73,6 +91,15 @@ internal fun isDesktopAssessmentCourseUrl(url: String): Boolean = when (assessme
     DESKTOP_COURSE_PATH, "/mooc2-ans/mycourse/studentcourse", "/mooc-ans/mycourse/studentcourse" -> true
     else -> false
 }
+
+/**
+ * 单项作业的电脑版页面（不含课程入口与作业列表）。
+ *
+ * 用于决定初始视图：只有单项电脑版页才默认进电脑版；课程入口/列表作为回退
+ * 切换目标时默认仍进手机版，避免一进来就是容易白页的电脑版列表。
+ */
+internal fun isIndividualDesktopAssessmentUrl(url: String): Boolean =
+    isDesktopAssessmentUrl(url) && !isDesktopAssessmentCourseUrl(url) && !isHomeworkListUrl(url)
 
 internal fun isCourseStudyUrl(url: String): Boolean {
     val path = assessmentPath(url) ?: return false

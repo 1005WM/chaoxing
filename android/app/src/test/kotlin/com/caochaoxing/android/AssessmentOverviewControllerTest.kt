@@ -210,6 +210,36 @@ class AssessmentOverviewControllerTest {
     }
 
     @Test
+    fun homeCountMatchesTodoCountIncludingExams() = runTest {
+        // 回归：主页卡片曾只统计作业（2），待办页统计作业+考试（4），导致“少一半”。
+        val course = course(1L, "书法鉴赏")
+        val work = pendingWork(course, "作业一")
+        val exam = work.copy(kind = ChaoxingAssessmentKind.EXAM, title = "考试一")
+        val controller = AssessmentOverviewController(
+            clientProvider = { client() }, scope = this,
+            fetchSummary = { _, _ -> ChaoxingAssessmentSummary(works = listOf(work), exams = listOf(exam)) },
+        )
+        controller.onAccountChanged("student")
+        controller.load(listOf(course))
+        advanceUntilIdle()
+
+        with(controller.uiState.value) {
+            assertEquals(1, pendingWorkCount)
+            assertEquals(1, pendingExamCount)
+            assertEquals(2, totalPending)
+            // 主页用的 totalPending 必须与待办页用的 pendingItems.size 一致。
+            assertEquals(pendingItems.size, totalPending)
+        }
+
+        // 本地标记完成一项后，两处口径仍保持一致。
+        assertTrue(controller.setWorkCompleted(work, true, "student"))
+        with(controller.uiState.value) {
+            assertEquals(pendingItems.size, totalPending)
+            assertEquals(1, totalPending)
+        }
+    }
+
+    @Test
     fun forceReloadRefetchesCachedCourses() = runTest {
         val math = course(1L, "高等数学")
         var calls = 0
