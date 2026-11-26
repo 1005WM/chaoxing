@@ -6,6 +6,7 @@ import com.caochaoxing.core.model.ChaoxingChapterAttachment
 import com.caochaoxing.core.service.*
 import com.caochaoxing.android.ui.screens.isAllowedAssessmentUrl
 import kotlinx.coroutines.*
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
@@ -359,7 +360,56 @@ class AiStudyController(private val context: Context, private val appState: Andr
 
     fun parseApplyResult(raw: String?): ApplyResult = parseAiApplyResult(raw)
 
+    /**
+     * 回填全部：按 [pairs] 顺序逐题回填，每题间隔 [intervalMs] 毫秒，单题失败不中断、跳过继续。
+     * [onEach] 在每题完成后回调（题号从 1 开始、结果、是否成功），用于实时进度提示。
+     */
+    suspend fun applyAllAnswers(
+        view: WebView,
+        pairs: List<Pair<Int, String>>,
+        intervalMs: Long = 1500L,
+        onEach: ((position: Int, total: Int, result: ApplyResult) -> Unit)? = null,
+    ): BatchApplySummary {
+        val total = pairs.size
+        var ok = 0
+        var skipped = 0
+        val failed = mutableListOf<Int>()
+        pairs.forEachIndexed { i, (index, answer) ->
+            val position = i + 1
+            if (i > 0) delay(intervalMs)
+            val result = runCatching {
+                val script = buildApplyAnswerScript(index, answer)
+                val raw = view.evaluateJavascriptSuspend(script)
+                parseAiApplyResult(raw)
+            }.getOrDefault(ApplyResult(false, detail = listOf("回填异常")))
+            if (result.ok) ok++ else { skipped++; failed.add(position) }
+            onEach?.invoke(position, total, result)
+        }
+        return BatchApplySummary(total = total, ok = ok, skipped = skipped, failedPositions = failed)
+    }
+
     private suspend fun readQuestions(url: String): List<AiQuestion> = pageReader.fromUrl(url).questions
+}
+
+/** 把 WebView.evaluateJavascript 的回调式 API 包装成挂起函数。 */
+private suspend fun WebView.evaluateJavascriptSuspend(script: String): String? =
+    suspendCancellableCoroutine { cont ->
+        evaluateJavascript(script) { value -> cont.resumeWith(Result.success(value)) }
+    }
+
+/** 汇总批量回填结果。失败题号从 1 开始，便于展示「第 N 题」。 */
+data class BatchApplySummary(
+    val total: Int = 0,
+    val ok: Int = 0,
+    val skipped: Int = 0,
+    val failedPositions: List<Int> = emptyList(),
+) {
+    val message: String get() = when {
+        total == 0 -> "没有可回填的答案"
+        skipped == 0 -> "已回填全部 $ok 题"
+        else -> "已回填 $ok 题，跳过 $skipped 题" +
+            (failedPositions.take(6).joinToString("、") { "第${it}题" }.let { "（$it${if (failedPositions.size > 6) " 等" else ""}）" })
+    }
 }
 
 /** 生成把答案写回第 [index] 道题的 JS。答案用 JSON 编码，避免引号/换行破坏脚本。 */

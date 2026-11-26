@@ -1034,7 +1034,7 @@ private fun AttachmentTaskRow(
 ) {
     var showAi by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     if (showAi) {
-        AiDraftSheet(attachment.externalUrl.orEmpty(), attachment.name, null) { showAi = false }
+        AiDraftSheet(attachment.externalUrl.orEmpty(), attachment.name, null, onDismiss = { showAi = false })
     }
     val icon = when (attachment.kind) {
         ChaoxingAttachmentKind.DOCUMENT -> Icons.Rounded.Description

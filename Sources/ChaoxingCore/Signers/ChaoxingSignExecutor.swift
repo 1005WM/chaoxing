@@ -16,10 +16,6 @@ public enum ChaoxingSignExecutor {
     private static let checkSignCodeBase = "https://mobilelearn.chaoxing.com/widget/sign/pcStuSignController/checkSignCode"
 
     private static let signedStatuses: Set<Int> = [1, 2, 3, 9]
-    // 上游 ChaoxingLocationSigner.notSignedPageMarkers：新版已签到页面文案。
-    private static let alreadySignedPageMarkers = [
-        "恭喜你已完成签", "已完成签到", "您已签到", "已经签到过了"
-    ]
 
     public static func preSignURL(client: ChaoxingHTTPClient, activity: ChaoxingSignActivity) -> URL {
         var components = URLComponents(string: preSignBase)!
@@ -66,12 +62,12 @@ public enum ChaoxingSignExecutor {
         if let status = attendanceStatus(in: body) {
             if signedStatuses.contains(status) { return .alreadySigned }
             guard status == 0 else { throw ChaoxingError.parseFailed("无法确认预签到状态") }
-        } else if Self.alreadySignedPageMarkers.contains(where: { body.contains($0) }) {
-            return .alreadySigned
         }
-        // 新版签到（含学习通新发布的“定位签到”）的预签到响应可能不再带
-        // activePrimaryId / primaryAttend 等旧标记。与上游 ChaoxingSigner 一致，
-        // 通过登录态、无权限、截止检查后一律按可签到处理，最终状态由签到接口确认。
+        // 已签到只认结构化状态 primaryAttend.status / signstatus（与上游 checkAlreadySign 一致）。
+        // 不能用页面文案（“已完成签到”“您已签到”“恭喜你已完成签”）做 substring 判断：
+        // 手势签到/定位签到等页面常把这类文案作为提示模板、历史记录或说明文字内嵌在 HTML 中，
+        // 用 contains 会把“尚未签到”的活动误判为“当前账号已签到”，进而禁用签到按钮。
+        // 缺少上述状态时一律按“未签到”处理，最终是否已签由签到接口给出权威结果。
         try? await postAnalysis(client: client, activeId: activity.id)
         try Task.checkCancellation()
         return .readyToSign

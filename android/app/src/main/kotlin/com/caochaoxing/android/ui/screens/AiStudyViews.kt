@@ -84,12 +84,15 @@ internal fun AiSettingsCard() {
 
 @Composable
 internal fun AiDraftSheet(id: String, title: String, questions: List<AiQuestion>?, readError: String = "", readWarning: String = "",
-    onApply: ((Int, String) -> Unit)? = null, onDismiss: () -> Unit) {
+    onApply: ((Int, String) -> Unit)? = null, onApplyAll: ((List<Pair<Int, String>>, () -> Unit) -> Unit)? = null, onDismiss: () -> Unit) {
     val controller = CaochaoxingApp.from(LocalContext.current).aiStudyController
     val drafts by controller.drafts.collectAsState()
     val draft = drafts[id]
     val shownQuestions = questions ?: draft?.questions.orEmpty()
     val matchingDraft = draft?.takeIf { it.questions.isEmpty() || it.questions == shownQuestions }
+    // 收集每题编辑后的答案，供“回填全部”使用；原始答案作为初始值。
+    val editedAnswers = remember(id, shownQuestions) { mutableStateMapOf<Int, String>() }
+    var applyAllRunning by remember(id) { mutableStateOf(false) }
     var showPreview by remember(id) { mutableStateOf(false) }
     if (showPreview) AiQuestionPreview(shownQuestions) { showPreview = false }
     val clipboard = LocalClipboardManager.current
@@ -115,6 +118,22 @@ internal fun AiDraftSheet(id: String, title: String, questions: List<AiQuestion>
                         Button(onClick = { controller.generate(id, title, questions) }, enabled = draft?.running != true && readError.isBlank()) { Text("生成答案") }
                         if (draft?.running == true) TextButton(onClick = { controller.cancel(id) }) { Text("停止") }
                     }
+                    if (onApplyAll != null) {
+                        Button(
+                            onClick = {
+                                val pairs = shownQuestions.mapIndexedNotNull { index, q ->
+                                    val answer = editedAnswers[index] ?: matchingDraft?.answers?.get(q.id)?.answer?.takeIf { it.isNotBlank() }
+                                    answer?.let { index to it }
+                                }
+                                if (pairs.isNotEmpty()) {
+                                    applyAllRunning = true
+                                    onApplyAll(pairs) { applyAllRunning = false }
+                                }
+                            },
+                            enabled = !applyAllRunning && draft?.running != true && matchingDraft?.answers?.isNotEmpty() == true,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text(if (applyAllRunning) "回填中…（每题间隔 1.5 秒）" else "回填全部（${matchingDraft?.answers?.size ?: 0} 题）") }
+                    }
                     matchingDraft?.let {
                         if (it.running) LinearProgressIndicator(Modifier.fillMaxWidth())
                         Text("${it.message}  ${it.answers.size} / ${it.questions.size}")
@@ -131,7 +150,8 @@ internal fun AiDraftSheet(id: String, title: String, questions: List<AiQuestion>
                         if (answer != null) key(id, answer) {
                             AiAnswerContent(answer,
                                 onCopy = { clipboard.setText(AnnotatedString(it)) },
-                                onApply = onApply?.let { apply -> { text -> apply(index, text) } })
+                                onApply = onApply?.let { apply -> { text -> apply(index, text) } },
+                                onEditedChange = { text -> editedAnswers[index] = text })
                         }
                         if (error != null) Text(error, color = CxPalette.cinnabar)
                         TextButton(onClick = { controller.generate(id, title, current.questions, retryId = question.id) }, enabled = !current.running) { Text("重试本题") }
@@ -143,7 +163,8 @@ internal fun AiDraftSheet(id: String, title: String, questions: List<AiQuestion>
 }
 
 @Composable
-internal fun AiAnswerContent(answer: AiAnswer, onCopy: (String) -> Unit, onApply: ((String) -> Unit)? = null) {
+internal fun AiAnswerContent(answer: AiAnswer, onCopy: (String) -> Unit, onApply: ((String) -> Unit)? = null,
+    onEditedChange: ((String) -> Unit)? = null) {
     if (answer.notice.isNotBlank()) Text(answer.notice, color = CxPalette.inkSecondary, style = MaterialTheme.typography.bodyMedium)
     if (answer.answer.isBlank()) {
         Text("模型原始回复", style = MaterialTheme.typography.titleMedium)
@@ -151,7 +172,8 @@ internal fun AiAnswerContent(answer: AiAnswer, onCopy: (String) -> Unit, onApply
         TextButton(onClick = { onCopy(answer.explanation) }) { Text("复制回复") }
         return
     }
-    var edited by rememberSaveable { mutableStateOf(answer.answer) }
+    var edited by rememberSaveable(answer.answer) { mutableStateOf(answer.answer) }
+    LaunchedEffect(edited) { onEditedChange?.invoke(edited) }
     var appliedMessage by remember(answer.answer) { mutableStateOf("") }
     OutlinedTextField(edited, { edited = it }, label = { Text("建议答案") }, modifier = Modifier.fillMaxWidth())
     if (answer.explanation.isNotBlank()) AiMathExplanation(answer.explanation)
@@ -188,5 +210,5 @@ internal fun AiFollowStudyCard() {
             TextButton(onClick = { selected = id }) { Text("${draft.title}  ${draft.answers.size}/${draft.questions.size}  ${draft.message}") }
         }
     }
-    selected?.let { id -> AiDraftSheet(id, drafts[id]?.title ?: "章节测验", null) { selected = null } }
+    selected?.let { id -> AiDraftSheet(id, drafts[id]?.title ?: "章节测验", null, onDismiss = { selected = null }) }
 }

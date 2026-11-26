@@ -96,10 +96,17 @@ extension ProtocolRegressionTests {
         #expect((try? await ChaoxingSignExecutor.preSign(client: c, activity: Self.activity)) == .readyToSign)
     }
 
-    @Test("New already-signed page text is recognized")
+    @Test("Embedded signed text does not mislead already-signed detection")
     func preSignAlreadySignedText() async {
-        let c = client(body: "<html>恭喜你已完成签</html>")
-        #expect((try? await ChaoxingSignExecutor.preSign(client: c, activity: Self.activity)) == .alreadySigned)
+        // 手势签到/定位签到页面常把这类文案作为提示模板、历史记录或说明文字内嵌在 HTML 中。
+        // 没有结构化状态时不能据此判定已签到，否则会禁用签到按钮。
+        for body in ["<html>恭喜你已完成签</html>", "<html>已完成签到 20/30 人，请先完成签到</html>"] {
+            let c = client(body: body)
+            #expect((try? await ChaoxingSignExecutor.preSign(client: c, activity: Self.activity)) == .readyToSign)
+        }
+        // 结构化状态仍然可信。
+        let signed = client(body: "{\"primaryAttend\":{\"status\":1}}")
+        #expect((try? await ChaoxingSignExecutor.preSign(client: signed, activity: Self.activity)) == .alreadySigned)
     }
 
     @Test("QR availability remains unknown on HTTP or incomplete JSON errors")

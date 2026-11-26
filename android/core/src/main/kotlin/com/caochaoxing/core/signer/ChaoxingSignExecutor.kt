@@ -48,13 +48,6 @@ object ChaoxingSignExecutor {
     private val PRIMARY_ATTEND_STATUS_REGEX = Regex(""""primaryAttend"\s*:\s*\{[^{}]*?"status"\s*:\s*(\d+)""")
     private val SIGN_STATUS_REGEX = Regex("""signstatus\s*=\s*(\d+)""")
     private val ANALYSIS_CODE_REGEX = Regex("""code='\+'([a-f0-9]+)'""")
-    // 上游 ChaoxingLocationSigner.notSignedPageMarkers：新版已签到页面文案。
-    private val ALREADY_SIGNED_PAGE_MARKERS = listOf(
-        "恭喜你已完成签",
-        "已完成签到",
-        "您已签到",
-        "已经签到过了",
-    )
 
     fun preSignUrl(client: ChaoxingHttpClient, activity: ChaoxingSignActivity): String =
         preSignUrl(ChaoxingEndpoints.PRODUCTION, client, activity)
@@ -131,13 +124,12 @@ object ChaoxingSignExecutor {
             if (status != 0) {
                 throw ChaoxingError.ParseFailed("无法确认预签到状态")
             }
-        } else if (isAlreadySignedPage(body)) {
-            return ChaoxingSignActivityStatus.ALREADY_SIGNED
         }
-        // 新版签到（含学习通新发布的“定位签到”）的预签到响应可能不再带
-        // activePrimaryId / primaryAttend 等旧标记。上游 ChaoxingSigner 对
-        // 这类响应一律按“未签到”处理，由后续签到接口给出最终状态。
-        // 这里不再因为缺少旧标记而拒绝，以免误判新活动页面。
+        // 已签到只认结构化状态 primaryAttend.status / signstatus（与上游 checkAlreadySign 一致）。
+        // 不能用页面文案（如“已完成签到”“您已签到”“恭喜你已完成签”）做 substring 判断：
+        // 手势签到/定位签到等页面常把这类文案作为提示模板、历史记录或说明文字内嵌在 HTML 中，
+        // 用 contains 会把“尚未签到”的活动误判为“当前账号已签到”，进而禁用签到按钮。
+        // 缺少上述状态时一律按“未签到”处理，最终是否已签由签到接口给出权威结果。
 
         try {
             postAnalysis(endpoints, client, activeId = activity.id)
@@ -166,9 +158,6 @@ object ChaoxingSignExecutor {
         }
         return null
     }
-
-    private fun isAlreadySignedPage(body: String): Boolean =
-        ALREADY_SIGNED_PAGE_MARKERS.any { body.contains(it) }
 
     private suspend fun postAnalysis(
         endpoints: ChaoxingEndpoints,

@@ -60,7 +60,9 @@ import com.caochaoxing.android.state.AssessmentPageExporter
 import com.caochaoxing.android.ui.theme.CxPalette
 import com.caochaoxing.android.ui.theme.CxTypography
 import com.caochaoxing.core.model.ChaoxingStoredCookie
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 只实现跳转相关的桥接通知：打开网页、退出页面。
@@ -372,6 +374,17 @@ fun AssessmentWebScreen(
                 val result = aiController.parseApplyResult(raw)
                 Toast.makeText(context, result.message, Toast.LENGTH_SHORT).show()
             }
+        },
+        onApplyAll = { pairs, onDone ->
+            aiReadScope.launch {
+                val summary = aiController.applyAllAnswers(webView, pairs, intervalMs = 1500L) { pos, total, _ ->
+                    Toast.makeText(context, "回填中 $pos/$total…", Toast.LENGTH_SHORT).show()
+                }
+                withContext(Dispatchers.Main.immediate) {
+                    Toast.makeText(context, summary.message, Toast.LENGTH_LONG).show()
+                    onDone()
+                }
+            }
         }) { showAi = false }
 
     BackHandler(enabled = canGoBack && !showAi) {
@@ -435,6 +448,10 @@ fun AssessmentWebScreen(
                             if (webView.url == page) { aiPageUrl = page; showAi = true }
                         }
                     }, enabled = !isLoading && !blocked && !readingAi) { Text(if (readingAi) "读题中…" else "AI 作答") }
+                    // 面板下滑关闭后可一键回看，无需重新读题/生成（答案仍在单例草稿中）。
+                    if (aiQuestions.isNotEmpty() && !showAi) {
+                        TextButton(onClick = { showAi = true }) { Text("回看", color = CxPalette.accent) }
+                    }
                     if (hasMobileVariant) {
                         IconButton(onClick = { desktopMode = !desktopMode }) {
                             Icon(

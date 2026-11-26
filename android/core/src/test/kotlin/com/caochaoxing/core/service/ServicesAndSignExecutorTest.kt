@@ -334,9 +334,34 @@ class ServicesAndSignExecutorTest {
     }
 
     @Test
-    fun `preSign treats new already-signed page text as alreadySigned`() = runBlocking {
+    fun `preSign does not misread embedded signed text as alreadySigned`() = runBlocking {
+        // 手势签到/定位签到页面常把这类文案作为提示模板、历史记录或说明文字内嵌在 HTML 中。
+        // 没有结构化状态时，一律不能据此判定“当前账号已签到”，否则会禁用签到按钮。
+        for (body in listOf(
+            "<html>恭喜你已完成签</html>",
+            "<html><body>已完成签到 20 人 / 共 30 人，请先完成签到</body></html>",
+            "<html>您已签到：此处为往期记录说明</html>",
+        )) {
+            withServer(
+                handler = { _ -> MockResponse().setBody(body) },
+            ) { _, endpoints, _ ->
+                val client = ChaoxingHttpClient.createForLoopbackTesting(syntheticSession())
+                try {
+                    assertEquals(
+                        ChaoxingSignActivityStatus.READY_TO_SIGN,
+                        ChaoxingSignExecutor.preSign(endpoints, client, syntheticActivity(id = 9001L)),
+                    )
+                } finally {
+                    client.invalidate()
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `preSign trusts structured signed status`() = runBlocking {
         withServer(
-            handler = { _ -> MockResponse().setBody("<html>恭喜你已完成签</html>") },
+            handler = { _ -> MockResponse().setBody("""{"primaryAttend":{"status":1}}""") },
         ) { _, endpoints, _ ->
             val client = ChaoxingHttpClient.createForLoopbackTesting(syntheticSession())
             try {

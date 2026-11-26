@@ -1,6 +1,7 @@
 package com.caochaoxing.android
 
 import com.caochaoxing.android.state.ApplyResult
+import com.caochaoxing.android.state.BatchApplySummary
 import com.caochaoxing.android.state.buildApplyAnswerScript
 import com.caochaoxing.android.state.parseAiApplyResult
 import org.junit.Assert.assertEquals
@@ -68,5 +69,15 @@ class AiAnswerApplyTest {
         assertFalse(failed.ok)
         assertEquals("未能回填：题目序号9不存在", failed.message)
         assertEquals(ApplyResult(false), ApplyResult(false))
+    }
+
+    @Test
+    fun batchSummaryMessages() {
+        assertEquals("没有可回填的答案", BatchApplySummary(total = 0).message)
+        assertEquals("已回填全部 5 题", BatchApplySummary(total = 5, ok = 5).message)
+        val partial = BatchApplySummary(total = 6, ok = 4, skipped = 2, failedPositions = listOf(2, 5))
+        assertTrue(partial.message.startsWith("已回填 4 题，跳过 2 题"))
+        assertTrue(partial.message.contains("第2题"))
+        assertTrue(partial.message.contains("第5题"))
     }
 }
