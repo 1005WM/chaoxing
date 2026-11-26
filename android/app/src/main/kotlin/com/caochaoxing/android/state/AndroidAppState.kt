@@ -537,6 +537,7 @@ class AndroidAppState(
         // 预签到可能刷新会话，详情请求要等它结束。
         val status = captureSignInfo { dependencies.prepareSign(client, activity) }
         checkSession(token)
+        status.getOrNull()?.let { updateActivitySignStatus(activity, it, token) }
         val detail = captureSignInfo {
             dependencies.fetchSignDetail(client, activity.id, activity.classId, activity.courseId)
         }
@@ -547,6 +548,27 @@ class AndroidAppState(
             statusError = status.exceptionOrNull()?.let(::describeSignInfoError),
             detailError = detail.exceptionOrNull()?.let(::describeSignInfoError),
         )
+    }
+
+    private fun updateActivitySignStatus(
+        activity: ChaoxingSignActivity,
+        status: ChaoxingSignActivityStatus,
+        token: SessionToken,
+    ) {
+        synchronized(stateLock) {
+            if (!isCurrentLocked(token)) return
+            val current = _uiState.value
+            _uiState.value = current.copy(
+                courseActivities = current.courseActivities.mapValues { (_, activities) ->
+                    activities.map { if (it.id == activity.id) it.copy(confirmedSignStatus = status) else it }
+                },
+                pendingRadarItems = if (status == ChaoxingSignActivityStatus.READY_TO_SIGN) {
+                    current.pendingRadarItems
+                } else {
+                    current.pendingRadarItems.filterNot { it.activity.id == activity.id }
+                },
+            )
+        }
     }
 
     private suspend fun <T> captureSignInfo(read: suspend () -> T): Result<T> = try {
@@ -581,8 +603,12 @@ class AndroidAppState(
             }
             val isStillValid = synchronized(stateLock) {
                 if (isCurrentLocked(token) && courseActivityRequestIds[courseKey] == requestId) {
+                    val previous = _uiState.value.courseActivities[courseKey].orEmpty().associateBy { it.id }
                     _uiState.value = _uiState.value.copy(
-                        courseActivities = _uiState.value.courseActivities + (courseKey to fetched),
+                        courseActivities = _uiState.value.courseActivities + (courseKey to fetched.map { activity ->
+                            val confirmed = previous[activity.id]?.confirmedSignStatus
+                            activity.copy(confirmedSignStatus = activity.confirmedSignStatus ?: confirmed)
+                        }),
                     )
                     true
                 } else {
@@ -679,7 +705,11 @@ class AndroidAppState(
                     )
                     return@synchronized
                 }
-                val sortedItems = found.sortedByDescending { it.activity.startTimeMs ?: 0L }
+                val confirmed = _uiState.value.courseActivities.values.flatten().associateBy { it.id }
+                val sortedItems = found.filter { item ->
+                    val status = confirmed[item.activity.id]?.confirmedSignStatus
+                    status != ChaoxingSignActivityStatus.ALREADY_SIGNED && status != ChaoxingSignActivityStatus.EXPIRED
+                }.sortedByDescending { it.activity.startTimeMs ?: 0L }
                 val nextError = if (failures > 0) {
                     "$failures/${targets.size} 门课程读取失败，当前仅显示成功读取的结果。${firstFailure.orEmpty()}"
                 } else {
@@ -1415,7 +1445,13 @@ class AndroidAppState(
         suspend fun publishResult(index: Int, result: Result<ChaoxingSignOutcome>) {
             resultMutex.withLock {
                 checkSession(token)
-                collected[index] = BatchSignResult.from(pairs[index].first, result)
+                val signedResult = BatchSignResult.from(pairs[index].first, result)
+                collected[index] = signedResult
+                if (signedResult.phoneNumber == _uiState.value.activePhoneNumber &&
+                    signedResult.disposition != BatchSignDisposition.FAILED_OR_UNCONFIRMED
+                ) {
+                    updateActivitySignStatus(activity, ChaoxingSignActivityStatus.ALREADY_SIGNED, token)
+                }
                 onProgress(collected.filterNotNull())
             }
         }

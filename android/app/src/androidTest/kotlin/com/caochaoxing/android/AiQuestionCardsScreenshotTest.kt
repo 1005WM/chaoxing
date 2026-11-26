@@ -81,7 +81,7 @@ class AiQuestionCardsScreenshotTest {
             scenario.onActivity { activity -> activity.setContent { CaochaoxingTheme {
                 Column(Modifier.fillMaxSize().systemBarsPadding().padding(20.dp)) {
                     Text("AI 作答", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 14.dp))
-                    AiQuestionCard(question, 3) { AiAnswerContent(answer.value) {} }
+                    AiQuestionCard(question, 3) { AiAnswerContent(answer.value, onCopy = {}) }
                 }
             } } }
             waitFor(screenshot.label)

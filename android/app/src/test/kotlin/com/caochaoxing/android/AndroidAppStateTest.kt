@@ -51,6 +51,52 @@ import java.io.IOException
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class AndroidAppStateTest {
+    @Test
+    fun activityListUsesConfirmedAttendanceAndKeepsAccountsSeparate() = runTest {
+        val first = sampleAccount("list-first")
+        val second = sampleAccount("list-second")
+        val course = ChaoxingCourse("高数", "老师", 1, 2, "")
+        val activity = resultTestActivity.copy(courseId = 1, classId = 2, userStatus = 1)
+        val deps = FakeAppStateDependencies(
+            onFetchCourses = { listOf(course) },
+            onFetchCourseActivities = { _, _ -> listOf(activity) },
+        )
+        val state = AndroidAppState(
+            InMemoryPersistenceStore(ChaoxingAppStateSnapshot(accounts = listOf(first, second))),
+            deps, backgroundScope,
+        )
+        state.loadFromDisk()
+        state.loadCourseActivities(course)
+        fun listed() = state.uiState.value.courseActivities.getValue(course.id).single()
+        assertFalse(listed().isAlreadySignedByStatus)
+        state.loadSignWorkspaceInfo(activity)
+        assertFalse(listed().isAlreadySignedByStatus)
+
+        deps.onPrepareSign = { _, _ -> ChaoxingSignActivityStatus.ALREADY_SIGNED }
+        state.loadSignWorkspaceInfo(activity)
+        assertTrue(listed().isAlreadySignedByStatus)
+        state.loadCourseActivities(course)
+        assertTrue(listed().isAlreadySignedByStatus)
+        state.scanPendingActivitiesRadar()
+        assertTrue(state.uiState.value.pendingRadarItems.isEmpty())
+
+        deps.onPrepareSign = { _, _ -> ChaoxingSignActivityStatus.READY_TO_SIGN }
+        state.loadSignWorkspaceInfo(activity)
+        assertFalse(listed().isAlreadySignedByStatus)
+        state.executeSignBatch(activity, setOf(first.phoneNumber)) { _, _, _, _ ->
+            ChaoxingSignOutcome(true, "success")
+        }
+        assertTrue(listed().isAlreadySignedByStatus)
+
+        state.switchActiveAccount(second)
+        state.loadCourseActivities(course)
+        assertFalse(listed().isAlreadySignedByStatus)
+        state.executeSignBatch(activity, setOf(first.phoneNumber)) { _, _, _, _ ->
+            ChaoxingSignOutcome(true, "success")
+        }
+        assertFalse(listed().isAlreadySignedByStatus)
+    }
+
 
     private class InMemoryPersistenceStore(
         initial: ChaoxingAppStateSnapshot = ChaoxingAppStateSnapshot(),
@@ -528,7 +574,8 @@ class AndroidAppStateTest {
             courseName = "高数",
             extContent = "{}",
         )
-        val signedAct = pendingAct.copy(id = 3002L, userStatus = 1, nameOne = "已签到活动")
+        val signedAct = pendingAct.copy(id = 3002L, userStatus = 1, nameOne = "已签到活动",
+            confirmedSignStatus = ChaoxingSignActivityStatus.ALREADY_SIGNED)
 
         val store = InMemoryPersistenceStore(
             initial = ChaoxingAppStateSnapshot(

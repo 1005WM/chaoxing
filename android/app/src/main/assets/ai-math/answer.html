@@ -40,8 +40,21 @@
     }
   }
 
-  window.showExplanation = (text, color, fontSize) => {
+  const answer = document.getElementById('answer');
+  let heightFrame;
+  function reportHeight() {
+    cancelAnimationFrame(heightFrame);
+    heightFrame = requestAnimationFrame(() => {
+      const height = Math.ceil(answer.getBoundingClientRect().height);
+      if (answer.clientWidth > 0 && height > 0) window.ExplanationSize?.onHeightChanged(height);
+    });
+  }
+  // WebView 的首次回调可能早于最终宽度和公式字体排版，持续按正文测量。
+  new ResizeObserver(reportHeight).observe(answer);
+  document.fonts.ready.then(reportHeight);
+  window.showExplanation = (text, color, fontSize, contentWidth) => {
     const answer = document.getElementById('answer');
+    if (contentWidth > 0) answer.style.width = contentWidth + 'px';
     answer.style.color = color;
     answer.style.fontSize = fontSize + 'px';
     answer.textContent = text;
@@ -63,6 +76,7 @@
         renderLegacy(node);
       }
     }
+    reportHeight();
     return Math.ceil(answer.getBoundingClientRect().height);
   };
 </script>

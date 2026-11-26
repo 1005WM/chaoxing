@@ -106,6 +106,7 @@ import com.caochaoxing.android.ui.screens.GroupListScreen
 import com.caochaoxing.android.ui.screens.KeepScreenOnWhileWatching
 import com.caochaoxing.android.ui.screens.LocationPresetsScreen
 import com.caochaoxing.android.ui.screens.LoginScreen
+import com.caochaoxing.android.ui.screens.FirstRunIntroduction
 import com.caochaoxing.android.ui.screens.AppUpdateHost
 import com.caochaoxing.android.ui.screens.OtherUsersScreen
 import com.caochaoxing.android.ui.screens.SettingsScreen
@@ -139,11 +140,13 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             CaochaoxingTheme {
-                CaochaoxingMainRoot(
-                    appState = app.appState,
-                    courseStudyController = app.courseStudyController,
-                )
-                AppUpdateHost(app.updateManager)
+                FirstRunIntroduction {
+                    CaochaoxingMainRoot(
+                        appState = app.appState,
+                        courseStudyController = app.courseStudyController,
+                    )
+                    AppUpdateHost(app.updateManager)
+                }
             }
         }
     }

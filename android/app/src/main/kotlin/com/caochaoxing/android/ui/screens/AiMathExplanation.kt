@@ -1,6 +1,7 @@
 package com.caochaoxing.android.ui.screens
 
 import android.annotation.SuppressLint
+import android.webkit.JavascriptInterface
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -18,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.caochaoxing.android.ui.theme.CxPalette
 import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicBoolean
 
 private val legacyMath = Regex("""[A-Za-zΑ-ω0-9)\]}]\s*[_^]\s*(?:\{[^{}\r\n]+\}|[A-Za-zΑ-ω0-9])""")
 private const val EXPLANATION_ASSET = "file:///android_asset/ai-math/answer.html"
@@ -35,8 +37,10 @@ internal fun AiMathExplanation(text: String) {
     val fontSize = with(density) { MaterialTheme.typography.bodyLarge.fontSize.toPx() / this.density }
     val color = "#" + (CxPalette.ink.toArgb() and 0xFFFFFF).toString(16).padStart(6, '0')
     BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val contentWidth = maxWidth.value
         key(text, maxWidth, color, fontSize) {
             var measuredHeight by remember { mutableIntStateOf(0) }
+            val released = remember { AtomicBoolean(false) }
             Column {
                 if (measuredHeight == 0) Text(text, color = CxPalette.ink, style = MaterialTheme.typography.bodyLarge)
                 AndroidView(
@@ -50,21 +54,32 @@ internal fun AiMathExplanation(text: String) {
                             settings.allowContentAccess = false
                             settings.blockNetworkLoads = true
                             settings.textZoom = 100
+                            addJavascriptInterface(object {
+                                @JavascriptInterface
+                                fun onHeightChanged(height: Int) {
+                                    post {
+                                        if (!released.get() && height > 0) measuredHeight = height + 2
+                                    }
+                                }
+                            }, "ExplanationSize")
                             webViewClient = object : WebViewClient() {
                                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = true
 
                                 override fun onPageFinished(view: WebView, url: String) {
                                     if (url != EXPLANATION_ASSET) return
                                     val safeText = JSONObject.quote(text).replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
-                                    view.evaluateJavascript("showExplanation($safeText,'$color',$fontSize)") { height ->
-                                        height.toIntOrNull()?.takeIf { it > 0 }?.let { measuredHeight = it + 2 }
-                                    }
+                                    view.evaluateJavascript("showExplanation($safeText,'$color',$fontSize,$contentWidth)", null)
                                 }
                             }
                             loadUrl(EXPLANATION_ASSET)
                         }
                     },
-                    onRelease = { view -> view.stopLoading(); view.destroy() },
+                    onRelease = { view ->
+                        released.set(true)
+                        view.removeJavascriptInterface("ExplanationSize")
+                        view.stopLoading()
+                        view.destroy()
+                    },
                 )
             }
         }

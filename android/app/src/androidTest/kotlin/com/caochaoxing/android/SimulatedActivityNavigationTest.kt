@@ -36,12 +36,13 @@ class SimulatedActivityNavigationTest {
         val automation = instrumentation.uiAutomation
         val course = ChaoxingCourse("交互设计基础", "陈老师", 41L, 52, "")
         val pending = ChaoxingSignActivity(
-            id = 61, endTimeMs = System.currentTimeMillis() + 3_600_000, userStatus = 0, otherId = "2", isLook = false, type = 2, activeType = 2,
+            id = 61, endTimeMs = System.currentTimeMillis() + 3_600_000, userStatus = 1, otherId = "2", isLook = false, type = 2, activeType = 2,
             nameOne = "课堂练习签到", status = 1, nameFour = "", courseId = course.courseId,
             classId = course.classId, courseName = course.courseName, extContent = "",
         )
         val closed = pending.copy(id = 62, nameOne = "上节课签到", status = 2, endTimeMs = null)
-        val signed = pending.copy(id = 63, nameOne = "实验课签到", userStatus = 1)
+        val signed = pending.copy(id = 63, nameOne = "实验课签到", userStatus = 1,
+            confirmedSignStatus = ChaoxingSignActivityStatus.ALREADY_SIGNED)
         val account = ChaoxingAccountSession("mock-student", "", "模拟同学", deviceCode = "mock")
         val store = object : PersistenceStore {
             var snapshot = ChaoxingAppStateSnapshot(accounts = listOf(account))
@@ -118,6 +119,11 @@ class SimulatedActivityNavigationTest {
         try {
             runBlocking { state.loadFromDisk() }
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                val startupDeadline = SystemClock.uptimeMillis() + 10000
+                while (node("跳过") == null && node("登录学习通") == null && SystemClock.uptimeMillis() < startupDeadline) {
+                    SystemClock.sleep(100)
+                }
+                if (node("跳过") != null) click("跳过")
                 waitFor("登录学习通")
                 capture("login")
                 scenario.onActivity { it.setContent { CaochaoxingTheme { CaochaoxingMainRoot(state) } } }
@@ -125,6 +131,9 @@ class SimulatedActivityNavigationTest {
                 capture("courses")
                 click(course.courseName)
                 waitFor(pending.nameOne)
+                val pendingRow = generateSequence(waitFor(pending.nameOne)) { it.parent }.first { it.isClickable }
+                assertTrue(descendants(pendingRow).any { it.text?.toString() == "进行中" })
+                assertFalse(descendants(pendingRow).any { it.text?.toString() == "已签到" })
                 fun top(text: String): Int {
                     val bounds = android.graphics.Rect()
                     waitFor(text).getBoundsInScreen(bounds)

@@ -180,7 +180,11 @@ class ChaoxingModelTest {
         )
         assertEquals(ChaoxingSignType.LOCATION, activity.signType)
         assertTrue(activity.isAvailable)
-        assertTrue(activity.isAlreadySignedByStatus)
+        for (hint in listOf(0, 1, 2, 3, 9)) {
+            assertFalse(activity.copy(userStatus = hint).isAlreadySignedByStatus)
+        }
+        assertTrue(activity.copy(confirmedSignStatus = ChaoxingSignActivityStatus.ALREADY_SIGNED).isAlreadySignedByStatus)
+        assertFalse(activity.copy(confirmedSignStatus = ChaoxingSignActivityStatus.READY_TO_SIGN).isAlreadySignedByStatus)
         assertFalse(activity.isLateAt(1_700_000_200_000L))
         assertTrue(activity.isLateAt(1_700_000_400_000L))
         assertFalse(activity.copy(endTimeMs = null).isLateAt(1_700_000_400_000L))

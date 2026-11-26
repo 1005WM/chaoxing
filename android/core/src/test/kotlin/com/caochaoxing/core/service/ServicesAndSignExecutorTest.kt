@@ -408,7 +408,7 @@ class ServicesAndSignExecutorTest {
         assertTrue(parsed[3].isLook)
         assertFalse(parsed[4].isLook)
         assertEquals(ChaoxingSignType.LOCATION, parsed[0].signType)
-        assertTrue(parsed[1].isAlreadySignedByStatus)
+        assertFalse(parsed[1].isAlreadySignedByStatus)
 
         // ext non-object fallback matches Swift
         for (extLiteral in listOf("null", "42", "\"encoded\"", "true")) {

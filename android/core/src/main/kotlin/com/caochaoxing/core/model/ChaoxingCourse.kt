@@ -87,15 +87,17 @@ data class ChaoxingSignActivity(
     val classId: Int,
     val courseName: String,
     val extContent: String,
+    val confirmedSignStatus: ChaoxingSignActivityStatus? = null,
 ) {
     val signType: ChaoxingSignType
         get() = ChaoxingSignType.fromOtherId(otherId)
 
     val isAvailable: Boolean
-        get() = status == 1
+        get() = status == 1 && confirmedSignStatus != ChaoxingSignActivityStatus.EXPIRED
 
     val isAlreadySignedByStatus: Boolean
-        get() = userStatus in SIGNED_STATUSES
+        // 活动列表的 userStatus 不能套用预签到页面的考勤状态码。
+        get() = confirmedSignStatus == ChaoxingSignActivityStatus.ALREADY_SIGNED
 
     val isLate: Boolean
         get() = isLateAt(System.currentTimeMillis())
@@ -105,9 +107,6 @@ data class ChaoxingSignActivity(
         return endMs > 0 && nowMs > endMs
     }
 
-    companion object {
-        private val SIGNED_STATUSES = setOf(1, 2, 3, 9)
-    }
 }
 
 @Serializable
